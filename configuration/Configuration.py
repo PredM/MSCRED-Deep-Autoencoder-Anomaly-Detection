@@ -23,7 +23,7 @@ class Configuration:
         # create input of NN
         self.filename_matrix_data = "matrix_win_"
         self.split_prefix_filename = 'start'
-        self.directoryname_matrix_data = '../data/matrix_data_2_test/'
+        self.directoryname_matrix_data = '../data/matrix_data_3_test/'
         self.directoryname_training_data = 'training_data/'
         self.directoryname_eval_data = 'evaluation_data/'
         self.reconstruction_error = 'reconstruction_error.npy'
@@ -100,14 +100,16 @@ class Configuration:
         # attribute for signature matrix generation
 
         # maximum step in ConvLSTM
-        #self.step_max = 5
         self.step_max = 5
         # gap time between each segment in time steps
         #self.gap_time = 125 #10#
-        self.gap_time = 500
+        self.gap_time = 125
         # window size / length of each segment
         #self.win_size = [125, 250, 375, 500, 625, 750, 875, 1000]  # [10, 30, 60]#
-        self.win_size = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1250, 1500, 1750, 2000, 2500, 3000] #[10, 30, 60]#
+        #self.win_size = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1250, 1500, 1750, 2000, 2500, 3000] #[10, 30, 60]#
+        #self.win_size = [5, 10, 15, 20, 25, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130,140, 150, 175, 200, 225, 250,
+        #                 275, 300, 325, 350, 375, 400, 425, 450, 475, 500, 550, 600, 650, 700, 750, 800, 850, 900, 950, 1000]
+        self.win_size = [5, 10, 15, 20, 25, 30, 40, 50, 60, 70, 80, 90, 100, 110, 125, 150, 200, 250]
         # train start point
         #NotUsed self.train_start_point = 0
         # train end point
@@ -128,17 +130,19 @@ class Configuration:
         self.validation_data = 0
 
         # NN parameter
+        self.num_datastreams = 61
         self.batch_size = 128
+        self.dim_of_dataset = 18 #1: 8 2: 17 3:18
         self.epochs = 10000
         self.learning_rate = 0.001
         self.length_training = 275818
         self.length_eval = 47657
         self.saver_step = 10
-        self.filter_dimension_encoder = [128, 256]#[64, 128, 256, 512]
+        self.filter_dimension_encoder = [32, 64, 128, 256] #[16, 32, 64, 128] #[32, 64, 128, 256] #[64, 128, 256, 512]
         self.stride_encoder = [1, 2]#[1, 2, 2, 2]
         self.filter_size_encoder = [[3, 3], [3, 3]]#[[3, 3], [3, 3], [2, 2], [2, 2]]
         self.dimension_lstm = [128, 256]# self.filter_dimension_encoder
-        self.filter_dimension_decoder = [128, 32, 3]#[256, 128, 64, 32, 3] #[128, 64, 32, 3]
+        # Not used, because equal to encoder: self.filter_dimension_decoder = [256, 128, 64, 32]#[256, 128, 64, 32, 3] #[128, 64, 32, 3]
         self.stride_decoder = [1, 2, 1]
         self.filter_size_decoder = [[3, 3], [3, 3], [1,1]]#[[2, 2], [2, 2], [3, 3], [3, 3], [3, 3]]
         self.filter = False
