@@ -133,7 +133,7 @@ class Configuration:
         self.num_datastreams = 61
         self.batch_size = 128
         self.dim_of_dataset = 18 #1: 8 2: 17 3:18
-        self.epochs = 10000
+        self.epochs = 1
         self.learning_rate = 0.001
         self.length_training = 275818
         self.length_eval = 47657

@@ -1,39 +1,35 @@
-# from _ctypes import sizeof
-# from ctypes import memset
-
-import numpy as np
-from mscred import MSCRED
-from mscred import MSCRED_woLSTM_woAttention
-from mscred import MSCRED_woAttention
-from mscred import MSCRED_with_LatentOutput
-from mscred import MSCRED_w_Noise
-from mscred import MSCRED_with_Memory
-from mscred import MSCRED_with_Memory2
-from mscred import MSCRED_with_Memory2_Auto
-from mscred import MSCRED_with_Memory2_Auto_InstanceBased
-from mscred import Memory
-from mscred import MemoryInstanceBased
 import os
 import sys
-import tensorflow.compat.v1 as tf
+import tensorflow as tf
 import pandas as pd
 import sklearn.model_selection as model_selection
 import matplotlib.pyplot as plt
-
-
-tf.disable_v2_behavior()
-# import logging
-
-sys.path.append(os.path.abspath(os.path.join(os.getcwd(), os.pardir)))
-
-# run able server
-sys.path.append(os.path.abspath("."))
-
+import numpy as np
+from mscred import MSCRED
+from mscred import MSCRED_with_LatentOutput
+from mscred import MSCRED_with_Memory2
+from mscred import MSCRED_with_Memory2_Auto
+#from mscred import MSCRED_with_Memory2_Auto_InstanceBased
+from mscred import Memory
+#from mscred import MemoryInstanceBased
 from configuration.Configuration import Configuration
 
+
+# TF and background relevant settings
+#tf.disable_v2_behavior()
+# import logging
+sys.path.append(os.path.abspath(os.path.join(os.getcwd(), os.pardir)))
+# run able server
+sys.path.append(os.path.abspath("."))
 print("Num GPUs Available: ", len(tf.config.experimental.list_physical_devices('GPU')))
 
+# Load configuration
 config = Configuration()
+
+# This method allows to compute thresholds on a hold-out validation data set that can be used for detecting anomalies on the test data set
+# Returns
+# thresholds: np matrix (dim, 2*attributes) with thresholds for each dimension and attribute (used in MSCRED-Framework)
+# mse_threshold: mse threshold value considering the full example
 def calculateThreshold(reconstructed_input, recon_err_perAttrib_valid, threshold_selection_criterium='99%', mse_per_example= None):
     thresholds = np.zeros((reconstructed_input.shape[3], reconstructed_input.shape[1] + reconstructed_input.shape[2]))
     mse_threshold = None
@@ -45,7 +41,7 @@ def calculateThreshold(reconstructed_input, recon_err_perAttrib_valid, threshold
         df_curr_dim = pd.DataFrame(data_curr_dim)
         # print(df_curr_dim.head())
         df_curr_dim_described = df_curr_dim.describe(percentiles=[.25, .5, .75, 0.9, 0.95, 0.97, 0.99])
-        print("Dim: ", i_dim, "Healthy: ")
+        print("Statistics of dim: ", i_dim, " from healthy data of the validation data set: ")
         print(df_curr_dim_described)
         # get max value for each sensor
         # max = df_curr_dim_described.loc['max', :]
@@ -55,12 +51,14 @@ def calculateThreshold(reconstructed_input, recon_err_perAttrib_valid, threshold
     if mse_per_example is not None:
         df_mse = pd.DataFrame(mse_per_example)
         df_mse_described = df_mse.describe(percentiles=[.25, .5, .75, 0.9, 0.95, 0.97, 0.99])
+        print("Statistics for mse from healthy data of the validation data set: ")
         print(df_mse_described)
         mse_threshold = df_mse_described.loc[threshold_selection_criterium].values
-        print("mse_threshold: ", mse_threshold)
+        print("Selected mse threshold: ", mse_threshold)
 
     return thresholds, mse_threshold
 
+# This method computes reconstruction errors
 def calculateReconstructionError(real_input, reconstructed_input,plot_heatmaps,use_corr_rel_matrix_for_loss=False, corr_rel_matrix=None):
     reconstruction_error_matrixes = np.zeros(
         (reconstructed_input.shape[0], reconstructed_input.shape[1], reconstructed_input.shape[2], reconstructed_input.shape[3]))
@@ -107,48 +105,35 @@ def calculateReconstructionError(real_input, reconstructed_input,plot_heatmaps,u
 
     return reconstruction_error_matrixes, reconstruction_errors_perAttribute, mse_per_example_over_all_dims
 
-def calculateAnomalies(reconstructed_input, recon_err_perAttrib_valid, thresholds):
-    eval_results = np.zeros(
-        (reconstructed_input.shape[0], reconstructed_input.shape[1] + reconstructed_input.shape[2], reconstructed_input.shape[3]))
-    for i_example in range(recon_err_perAttrib_valid.shape[0]):
-        rec_error_curr_example = recon_err_perAttrib_valid[i_example, :, :]
+# This method compares threshold values with the reconstruction error and marks anomalous events
+# Returns
+# eval_results (#Examples, 2*attributes, dim) where each with 1 indicates an anomaly
+# eval_results_over_all_dimensions (#Examples, 2*attributes, 1) sums the number of dimensions with anomalies
+# eval_results_over_all_dimensions_for_each_example (#Examples, dim) sums the number of examples that have
+def calculateAnomalies(reconstructed_input, recon_err_perAttrib, thresholds, print_att_dim_statistics = True):
+    eval_results = np.zeros((reconstructed_input.shape[0], reconstructed_input.shape[1] + reconstructed_input.shape[2], reconstructed_input.shape[3]))
+
+    for i_example in range(recon_err_perAttrib.shape[0]):
+        rec_error_curr_example = recon_err_perAttrib[i_example, :, :]
         for i_dim in range(reconstructed_input.shape[3]):
             # Compare reconstruction error if it exceeds threshold to detect an anomaly
             eval = rec_error_curr_example[:, i_dim] > thresholds[i_dim, :]
             eval_results[i_example, :, i_dim] = eval
 
-    #print("eval_results shape: ", eval_results.shape)
     eval_results_over_all_dimensions = np.sum(eval_results, axis=2)
     eval_results_over_all_dimensions_for_each_example = np.sum(eval_results, axis=1)
     #print("eval_results_over_all_dimensions shape: ", eval_results_over_all_dimensions.shape)
-    #print("eval_results_over_all_dimensions shape: ", eval_results_over_all_dimensions_for_each_example.shape)
-    for i_dim in range(reconstructed_input.shape[3]):
-        #print("Current Dimension: ", i_dim)
-        for i in range(10):
-            print("examples with ", i, " anomalies: ",(eval_results_over_all_dimensions_for_each_example[:, i_dim] == i).sum())
-        # num_ones = (y == 1).sum()
+    #print("eval_results_over_all_dimensions_for_each_example shape: ", eval_results_over_all_dimensions_for_each_example.shape)
+    if print_att_dim_statistics:
+        for i_dim in range(reconstructed_input.shape[3]):
+            print("Investigation of Dimension: ", i_dim, " for the number of attributes of an anomaly")
+            for i in range(reconstructed_input.shape[1]+reconstructed_input.shape[1]):
+                print("Num of examples with ", i ," anomalous attributes (rows&columns) in dimension", i_dim, " anomalies: ",(eval_results_over_all_dimensions_for_each_example[:, i_dim] == i).sum())
+            # num_ones = (y == 1).sum()
 
     return eval_results, eval_results_over_all_dimensions, eval_results_over_all_dimensions_for_each_example
 
-def printEvaluation(reconstructed_input, eval_results_over_all_dimensions,feature_names,num_of_dim_under_threshold=0, num_of_dim_over_threshold=1000):
-    for example_idx in range(reconstructed_input.shape[0]):
-        idx_with_Anomaly_1 = np.where(np.logical_and(
-            num_of_dim_under_threshold > eval_results_over_all_dimensions[example_idx, :reconstructed_input.shape[1]],
-            eval_results_over_all_dimensions[example_idx, :reconstructed_input.shape[1]] > num_of_dim_over_threshold))
-        count_dim_anomalies_1 = eval_results_over_all_dimensions[example_idx, :reconstructed_input.shape[1]][
-            idx_with_Anomaly_1]
-        # print("eval_results_over_all_dimensions_f: ", eval_results_over_all_dimensions[example_idx,:pred.shape[1]])
-        # idx_with_Anomaly_2 = np.where(eval_results_over_all_dimensions[example_idx,pred.shape[1]:] > num_of_dim_over_threshold)
-        idx_with_Anomaly_2 = np.where(np.logical_and(
-            num_of_dim_under_threshold > eval_results_over_all_dimensions[example_idx, reconstructed_input.shape[1]:],
-            eval_results_over_all_dimensions[example_idx, reconstructed_input.shape[1]:] > num_of_dim_over_threshold))
-        count_dim_anomalies_2 = eval_results_over_all_dimensions[example_idx, reconstructed_input.shape[1]:][
-            idx_with_Anomaly_2]
-        print("NoFailure: ", " idx_with_Anomaly_1:  ", feature_names[idx_with_Anomaly_1], " with counts: ",
-              count_dim_anomalies_1)
-        print("NoFailure: ", "idx_with_Anomaly_2: ", feature_names[idx_with_Anomaly_2], " with counts: ",
-              count_dim_anomalies_2)
-
+# This method conducts the evaluation process and print out relevant results
 def printEvaluation2(reconstructed_input, eval_results_over_all_dimensions, feature_names, labels=None,
                      num_of_dim_under_threshold=0, num_of_dim_over_threshold=1000, mse_threshold=None, mse_values=None):
     TP = 0
@@ -209,7 +194,7 @@ def printEvaluation2(reconstructed_input, eval_results_over_all_dimensions, feat
         print("No_Failure Recall: ", rec)
         print("No_Failure F1: ", f1)
 
-
+# Not used anymore
 def plot_heatmap_of_reconstruction_error(input, output, rec_error_matrix, id, dim):
     print("example id: ", id)
     fig, axs = plt.subplots(3)
@@ -223,6 +208,7 @@ def plot_heatmap_of_reconstruction_error(input, output, rec_error_matrix, id, di
     plt.savefig(filename)
     print("plot_heatmap_of_reconstruction_error")
 
+# Generates a heat map of the reconstruction error and shows the real input and its reconstruction
 def plot_heatmap_of_reconstruction_error2(input, output, rec_error_matrix, id):
     #print("example id: ", id)
     fig, axs = plt.subplots(3,8, gridspec_kw = {'wspace':0.1, 'hspace':-0.1})
@@ -271,9 +257,11 @@ def plot_heatmap_of_reconstruction_error2(input, output, rec_error_matrix, id):
     plt.clf()
     #print("plot_heatmap_of_reconstruction_error")
 
+# Loss Function that receives an external matrix where relevant correlations are defined manually (based on domain
+# knowledge)
+# Input: corr_rel_mat (Attributes,Attributes) with {0,1}
 def corr_rel_matrix_weighted_loss(corr_rel_mat):
     def loss(y_true, y_pred):
-        # MSE
         loss = tf.square(y_true - y_pred)
         print("loss dim: ", loss.shape)
         #if use_corr_rel_matrix:
@@ -284,8 +272,9 @@ def corr_rel_matrix_weighted_loss(corr_rel_mat):
         return loss
     return loss  # Note the `axis=-1`
 
-def my_loss_fn(y_true, y_pred):
-    # MSCRED Implementation
+# Loss function according to the MSCRED paper, but in the official impl. MSE is used
+def mscred_loss_acc_paper(y_true, y_pred):
+    # MSCRED loss according to paper
     # squared_difference = tf.square(y_true - y_pred)
     loss = np.square(np.linalg.norm((y_true - y_pred), ord='fro'))
     print("loss dim: ", loss.shape)
@@ -364,30 +353,38 @@ def my_loss_fn2_MemEntropy(y_true, y_pred):
     loss = tf.reduce_mean(mem_etrp)
     return loss
 def main():
+    # Configurations
     use_data_set_version = 3
-    train_model = False
-    use_mscred_wo_LSTM_wo_Attention = False     #Entweder das oder das nächste, sonst normales mscred
-    use_mscred_wo_Attention = False
-    use_mscred_w_Noise = False                   # denoising autoencoder
-    use_mscred_memory = True
-    use_mscred_memory2 = False
+    train_model = True
     test_model = True
-    loss_use_corr_rel_matrix = False # Reconstruction error is only based on relevant correlations
+
+    # Variants of the MSCRED
+    guassian_noise_stddev = None    #MSCRED default: None, None für nichts oder Wert: 0.1 / denoising autoencoder
+    use_attention = True            #MSCRED default: True, Deaktivierung der Attention
+    use_ConvLSTM = True             #MSCRED default: True, Deaktivierung des ConvLSTM und Attention
+
+    use_mscred_memory = False
+    use_mscred_memory2 = False
+
+    loss_use_corr_rel_matrix = True # Reconstruction error is only based on relevant correlations
     loss_use_batch_sim_siam = False
     use_corr_rel_matrix_for_input = False # input contains only relevant correlations, others set to zero
     use_corr_rel_matrix_for_input_replace_by_epsilon = False # meaningful correlation that would be zero, are now near zero
     plot_heatmap_of_rec_error = False
-    curr_run_identifier = "data_set_3_use_mscred_memory2" #mat_data1_standardModell_eucl, mat_data1_standardModell_CorrMatLoss
+    curr_run_identifier = "data_set_3_use_mscred_memory2_test3" #mat_data1_standardModell_eucl, mat_data1_standardModell_CorrMatLoss
     batch_size = config.batch_size
     epochs = config.epochs
     learning_rate = config.learning_rate
     step_size = config.step_max
     early_stopping_patience = 5
     split_train_test_ratio=0.1
+
     # Test Parameter:
     threshold_selection_criterium = '99%' # 'max', '99%'
     num_of_dim_over_threshold = 3 # normal: 0
     num_of_dim_under_threshold = 20 # normal: 10 (higher as max. dim value) # 3: 20
+    print_att_dim_statistics = False
+    generate_deep_encodings = False
     #TODO: change data path self.training_data_folder = "../../../../data/pklein/PredMSiamNN/data/training_data/" #Im homeVerzeichnis: '../../PredMSiamNN2/data/training_data/'
     path= "../data/"
     if use_data_set_version == 1:
@@ -428,20 +425,15 @@ def main():
     print('-------------------------------')
     print('Creation of the model')
     # create graph structure of the NN
-    if use_mscred_wo_LSTM_wo_Attention:
-        model_MSCRED = MSCRED_woLSTM_woAttention().create_model()
-    elif use_mscred_wo_Attention:
-        model_MSCRED = MSCRED_woAttention().create_model()
-    elif loss_use_batch_sim_siam:
+    if loss_use_batch_sim_siam:
         model_MSCRED = MSCRED_with_LatentOutput().create_model()
-    elif use_mscred_w_Noise:
-        model_MSCRED = MSCRED_w_Noise().create_model()
     elif use_mscred_memory:
         model_MSCRED = MSCRED_with_Memory2_Auto().create_model()
     elif use_mscred_memory2:
         model_MSCRED = MSCRED_with_Memory2_Auto_InstanceBased().create_model()
     else:
-        model_MSCRED = MSCRED().create_model()
+        model_MSCRED = MSCRED().create_model(guassian_noise_stddev=guassian_noise_stddev,
+                                             use_attention=use_attention, use_ConvLSTM=use_ConvLSTM)
     print(model_MSCRED.summary())
     tf.keras.utils.plot_model(model_MSCRED, to_file='model_plot.png', show_shapes=True, show_layer_names=True)
 
@@ -489,8 +481,7 @@ def main():
 
         # Training of the model
         opt = tf.keras.optimizers.Adam(learning_rate=learning_rate)
-        #history = model_MSCRED.compile(optimizer=opt, loss=[my_loss_fn2_0, my_loss_fn2_1], loss_weights=[1.0,0.1]) #tf.keras.losses.mse
-        #history = model_MSCRED.compile(optimizer=opt, loss=tf.keras.losses.mse)  #
+
         if loss_use_corr_rel_matrix:
             history = model_MSCRED.compile(optimizer=opt, loss=corr_rel_matrix_weighted_loss(corr_rel_mat=np_corr_rel_matrix))
             model_MSCRED.fit(X_train, X_train_y, epochs=epochs, batch_size=batch_size, shuffle=True,
@@ -579,6 +570,16 @@ def main():
             X_test_recon = model_MSCRED.predict(X_test, batch_size=128)  # [0]
         print("Reconstruction of test data set done with shape :", X_test_recon.shape)  # ((9, 61, 61, 3))
 
+        # Generate deep encodings
+        # Dummy model for obtaining access to latent encodings / space
+        if generate_deep_encodings:
+            layer_name = 'Reshape_ToOrignal_ConvLSTM_4'
+            intermediate_layer_model = tf.keras.Model(inputs=model_MSCRED.input,
+                                                   outputs=model_MSCRED.get_layer(layer_name).output)
+            encoded_output = intermediate_layer_model.predict(X_test, batch_size=128)
+            print("Encoded_output shape: ", encoded_output.shape)
+            np.save('encoded_test.npy', encoded_output)
+
         # Remove any dimension with size of 1
         X_valid_y = np.squeeze(X_valid_y)
         X_test_y = np.squeeze(X_test_y)
@@ -598,17 +599,18 @@ def main():
                                                                threshold_selection_criterium=threshold_selection_criterium, mse_per_example=mse_per_example_valid)
 
         # Evaluate
-        eval_results, eval_results_over_all_dimensions, eval_results_over_all_dimensions_for_each_example = calculateAnomalies(reconstructed_input=X_valid_recon, recon_err_perAttrib_valid=recon_err_perAttrib_valid, thresholds=thresholds)
-        eval_results_f, eval_results_over_all_dimensions_f, eval_results_over_all_dimensions_for_each_example_f = calculateAnomalies(reconstructed_input=X_test_recon, recon_err_perAttrib_valid=recon_err_perAttrib_test, thresholds=thresholds)
+        eval_results, eval_results_over_all_dimensions, eval_results_over_all_dimensions_for_each_example = calculateAnomalies(reconstructed_input=X_valid_recon, recon_err_perAttrib=recon_err_perAttrib_valid, thresholds=thresholds, print_att_dim_statistics = print_att_dim_statistics)
+        eval_results_f, eval_results_over_all_dimensions_f, eval_results_over_all_dimensions_for_each_example_f = calculateAnomalies(reconstructed_input=X_test_recon, recon_err_perAttrib=recon_err_perAttrib_test, thresholds=thresholds, print_att_dim_statistics = print_att_dim_statistics)
 
         # Get Positions of anomalies
         feature_names = np.load(feature_names_path)
-        print("feature_names: ", feature_names)
-        print("#### No-FAILURES #####")
+        print("Feature Names Overview: ", feature_names)
+
+        print("#### Evaluate No-FAILURES / Validation data set #####")
         printEvaluation2(reconstructed_input=X_valid_recon, eval_results_over_all_dimensions=eval_results_over_all_dimensions, feature_names=feature_names,
                         num_of_dim_under_threshold=num_of_dim_under_threshold, num_of_dim_over_threshold=num_of_dim_over_threshold,
                          mse_threshold=mse_threshold, mse_values=mse_per_example_valid)
-        print("#### FAILURES #####")
+        print("#### Evaluate No-FAILURES and FAILURES / Test data set #####")
         printEvaluation2(reconstructed_input=X_test_recon, eval_results_over_all_dimensions=eval_results_over_all_dimensions_f, feature_names=feature_names, labels = train_failure_labels_y,
                         num_of_dim_under_threshold=num_of_dim_under_threshold, num_of_dim_over_threshold=num_of_dim_over_threshold,
                          mse_threshold=mse_threshold, mse_values=mse_per_example_test)
