@@ -201,7 +201,7 @@ def printEvaluation2(reconstructed_input, eval_results_over_all_dimensions, feat
         print("No_Failure FP: ", FP)
         print("No_Failure FN: ", FN)
         prec = TP/(TP+FP)
-        rec = TP(TP+FN)
+        rec = TP/(TP+FN)
         acc = (TP+TN)/(TP+TN+FP+FN)
         f1 = 2*((prec*rec)/(prec+rec))
         print("No_Failure Acc: ", acc)
