@@ -65,8 +65,8 @@ def main():
     print("Test", train_data.shape)
 
     # Find trajectories for training
-    tractory_counter = 0
-    curr_tractory_instances = 0
+    run_counter = 0
+    curr_run_instances = 0
     curr_trjactory_indices = []
     runs = []
     runFailureLabels = []
@@ -76,21 +76,21 @@ def main():
         currEndDate = train_data[entry,1]
         found = np.argwhere(train_data[:,0] == currEndDate)
         #print("Found:",found, "enddate:", currEndDate)
-        if found.size == 0 and curr_tractory_instances > 4:
-            #print("new trajectory: ", curr_tractory_instances)
+        if found.size == 0 and curr_run_instances > 4:
+            #print("new trajectory: ", curr_run_instances)
             #print("indicies: ", curr_trjactory_indices)
             runs.append(curr_trjactory_indices)
-            tractory_counter = tractory_counter +1
-            curr_tractory_instances = 0
+            run_counter = run_counter +1
+            curr_run_instances = 0
             curr_trjactory_indices = []
             runFailureLabels.append(train_data[entry,2])
             runFailureTimes.append(train_data[entry,1])
         else:
             #print(entry)
             curr_trjactory_indices.append(entry)
-            curr_tractory_instances = curr_tractory_instances +1
+            curr_run_instances = curr_run_instances +1
 
-    print("tractory_counter: ", tractory_counter)
+    print("run_counter: ", run_counter)
     print("runs: ", runs)
     print("runs length: ", len(runs))
 

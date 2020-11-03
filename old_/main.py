@@ -2,7 +2,7 @@
 # from ctypes import memset
 
 import numpy as np
-from DN.MscredModel import MSCRED
+from anomaly_detection.MscredModel import MSCRED
 import os
 import sys
 import tensorflow.compat.v1 as tf

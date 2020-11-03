@@ -5,12 +5,12 @@ import pandas as pd
 import sklearn.model_selection as model_selection
 import matplotlib.pyplot as plt
 import numpy as np
-from mscred import MSCRED
-from mscred import MSCRED_with_LatentOutput
-from mscred import MSCRED_with_Memory2
-from mscred import MSCRED_with_Memory2_Auto
+from MscredModel import MSCRED
+from MscredModel import MSCRED_with_LatentOutput
+from MscredModel import MSCRED_with_Memory2
+from MscredModel import MSCRED_with_Memory2_Auto
 #from mscred import MSCRED_with_Memory2_Auto_InstanceBased
-from mscred import Memory
+from MscredModel import Memory
 #from mscred import MemoryInstanceBased
 from configuration.Configuration import Configuration
 
