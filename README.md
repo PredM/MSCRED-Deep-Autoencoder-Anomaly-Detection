@@ -18,11 +18,20 @@ The following section gives an overview of the packages, directories and include
 | data/Attribute_Correlation_Relevance_Matrix_v0.csv | Matrix with manually defined relevance for each correlation between data streams |
 | configurations/Configuration.py | Provides mainly configuration settings for matrix signature generation as well as some model specific as well as training specific paramters |
 
-## Dataset
+## Data Set
+### Data Set Genration
+- The data sets are based on: https://seafile.rlp.net/d/69434c0df2c3493aac7f/.
+- This data set can be transformed to signature matrixes as follows:
+    1. Transform them back in to the original sequence order by using: <i>data/GenerateNoFailureRuns.py </i>
+    2. Generate the signature matrixes by using: <i>data/MatrixGenerator2_TrainDataWOFailures.py </i>	
+    3. Transform them into examples consiting of the step_size and gap_size by using: <i>data/Matrix_to_NN-Input_train_woFailure.py </i>
+
+### Data Sets (with different Signature Matrix Configurations)
 From preprocessed time series data (4ms sampling rate, 250 entires per second), the following signature matrix data sets are generated:
 
 | No | Folder | Steps per Example | Gap Time in ms | Correlation Window Sizes in ms|
 | ------ | ------ | ------ | ------ | ------|
-| 1 | 1 | 5 | 125 | [125, 250, 375, 500, 625, 750, 875, 1000]|
-| 2 | 2 | 5 | 4000 ? | [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1250, 1500, 1750, 2000, 2500, 3000]|
-| 3 | 3 | 5 | 125 | [5, 10, 15, 20, 25, 30, 40, 50, 60, 70, 80, 90, 100, 110, 125, 150, 200, 250] |
+| 1 | / data / pklein / MSCRED_Input_Data | 5 | 125 | [125, 250, 375, 500, 625, 750, 875, 1000]|
+| 2 | / data / pklein / MSCRED_Input_Data | 5 | 4000 ? | [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1250, 1500, 1750, 2000, 2500, 3000]|
+| 3 | / data / pklein / MSCRED_Input_Data | 5 | 125 | [5, 10, 15, 20, 25, 30, 40, 50, 60, 70, 80, 90, 100, 110, 125, 150, 200, 250] |
+
