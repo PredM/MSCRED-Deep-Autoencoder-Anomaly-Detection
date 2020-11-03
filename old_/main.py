@@ -2,7 +2,7 @@
 # from ctypes import memset
 
 import numpy as np
-from DN.mscred import MSCRED
+from DN.MscredModel import MSCRED
 import os
 import sys
 import tensorflow.compat.v1 as tf
