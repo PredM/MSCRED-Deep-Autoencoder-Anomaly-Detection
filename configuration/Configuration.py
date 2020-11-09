@@ -11,19 +11,53 @@ class Configuration:
         self.load_config_json('../configuration/config.json')
 
         ###
-        # name of the directories and files
+        # General Configuration
         ###
-
-        self.filename_matrix_data = "matrix_win_"
-
-        self.step_size_reconstruction = 1
+        self.curr_run_identifier = "data_set_3_use_mscred_memory2_test6"
+        self.use_data_set_version = 3
+        self.train_model = False
+        self.test_model = True
 
         ###
-        # NN
+        # Autoencoder Configuration
         ###
+        # Variants of the MSCRED
+        self.guassian_noise_stddev = None       # MSCRED default: None, None für nichts oder Wert: 0.1 / denoising autoencoder
+        self.use_attention = True               # MSCRED default: True, Deaktivierung der Attention, erfordert ConvLSTM
+        self.keras_attention_layer_instead_of_own_impl = False  # MSCRED default: False, ansonsten andere Attention als im peper beschrieben
+        self.use_convLSTM = True                # MSCRED default: True, Deaktivierung des ConvLSTM und Attention mittels False
+        self.use_memory_restriction = False     # MSCRED default: False, Restricts the output only on previously seen examples
 
-        # attribute for signature matrix generation
+        self.use_loss_corr_rel_matrix = False   # MSCRED default: False, Reconstruction error is only based on correlations that are manually defined as relevant
+        self.loss_use_batch_sim_siam = False    # MSCRED default: False,
+        self.use_corr_rel_matrix_for_input = False  # MSCRED default: False,  input contains only relevant correlations, others set to zero
+        self.use_corr_rel_matrix_for_input_replace_by_epsilon = False  # MSCRED default: False,  meaningful correlation that would be zero, are now near zero
 
+        # NN parameter
+        self.num_datastreams = 61
+        self.batch_size = 128
+        self.dim_of_dataset = 18  # 1: 8 2: 17 3:18
+        self.epochs = 1
+        self.learning_rate = 0.001
+        self.early_stopping_patience = 3
+        self.split_train_test_ratio = 0.1
+        self.filter_dimension_encoder = [32, 64, 128, 256]  # [16, 32, 64, 128] #[32, 64, 128, 256] #[64, 128, 256, 512]
+        self.memory_size = 100
+
+        ###
+        # Test Evaluation
+        ###
+        self.use_corr_rel_matrix_in_eval = self.use_loss_corr_rel_matrix
+        self.threshold_selection_criterium = '99%'  # 'max', '99%' #[.25, .5, .75, 0.9, 0.95, 0.97, 0.99]
+        self.num_of_dim_over_threshold = 3  # normal: 0
+        self.num_of_dim_under_threshold = 20  # normal: 10 (higher as max. dim value) # 3: 20
+        self.print_att_dim_statistics = False
+        self.generate_deep_encodings = False
+        self.plot_heatmap_of_rec_error = False
+
+        ###
+        # Data Generation Configuration
+        ###
         # maximum step in ConvLSTM
         self.step_max = 5
         # gap time between each segment in time steps
@@ -36,21 +70,36 @@ class Configuration:
         #                 275, 300, 325, 350, 375, 400, 425, 450, 475, 500, 550, 600, 650, 700, 750, 800, 850, 900, 950, 1000]
         self.win_size = [5, 10, 15, 20, 25, 30, 40, 50, 60, 70, 80, 90, 100, 110, 125, 150, 200, 250]
 
-        # NN parameter
-        self.num_datastreams = 61
-        self.batch_size = 128
-        self.dim_of_dataset = 18  # 1: 8 2: 17 3:18
-        self.epochs = 1000
-        self.learning_rate = 0.001
-        self.filter_dimension_encoder = [32, 64, 128, 256]  # [16, 32, 64, 128] #[32, 64, 128, 256] #[64, 128, 256, 512]
-        self.memory_size = 100
-        # self.stride_encoder = [1, 2]#[1, 2, 2, 2]
-        # self.filter_size_encoder = [[3, 3], [3, 3]]#[[3, 3], [3, 3], [2, 2], [2, 2]]
-        # self.dimension_lstm = [128, 256]# self.filter_dimension_encoder
-        # Not used, because equal to encoder: self.filter_dimension_decoder = [256, 128, 64, 32]#[256, 128, 64, 32, 3] #[128, 64, 32, 3]
-        # self.stride_decoder = [1, 2, 1]
-        # self.filter_size_decoder = [[3, 3], [3, 3], [1,1]]#[[2, 2], [2, 2], [3, 3], [3, 3], [3, 3]]
-        # self.filter = False
+        self.filename_matrix_data = "matrix_win_"
+        self.step_size_reconstruction = 1
+
+        ###
+        # Data Set Configuration
+        ###
+        path = "../../../../data/pklein/MSCRED_Input_Data/"
+        if self.use_data_set_version == 1:
+            self.training_data_set_path = path + "training_data_set.npy"
+            self.valid_split_save_path = path + "training_data_set_test_split.npy"
+            self.test_matrix_path = path + "training_data_set_failure.npy"
+            self.test_labels_y_path = path + "training_data_set_failure_labels_test.npy"
+            self.test_matrix_path = path + "test_data_set.npy"
+            self.test_labels_y_path = path + "test_data_set_failure_labels.npy"
+        elif self.use_data_set_version == 2:
+            self.training_data_set_path = path + "training_data_set_2_trainWoFailure.npy"
+            self.valid_split_save_path = path + "training_data_set_2_test_split.npy"
+            self.test_matrix_path = path + "training_data_set_2_trainWFailure.npy"
+            self. test_labels_y_path = path + "training_data_set_2_failure_labels.npy"
+            self.test_matrix_path = path + "test_data_set_2.npy"
+            self.test_labels_y_path = path + "test_data_set_2_failure_labels.npy"
+        elif self.use_data_set_version == 3:
+            self.training_data_set_path = path + "training_data_set_3_trainWoFailure.npy"
+            self.valid_split_save_path = path + "training_data_set_3_test_split.npy"
+            self.test_matrix_path = path + "training_data_set_3_trainWFailure.npy"
+            self.test_labels_y_path = path + "training_data_set_3_failure_labels.npy"
+            self.test_matrix_path = path + "test_data_set_3.npy"
+            self.test_labels_y_path = path + "test_data_set_3_failure_labels.npy"
+
+        self.feature_names_path = "../data/feature_names.npy"
 
     def load_config_json(self, file_path):
         with open(file_path, 'r') as f:

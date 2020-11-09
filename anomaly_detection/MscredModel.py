@@ -11,6 +11,7 @@ import tensorflow.keras.backend as K
 
 # Paper "A Deep Neural Network for Unsupervised AnomalyDetection and Diagnosis in Multivariate Time Series Data" by Chuxu Zhang,§∗Dongjin Song,†∗Yuncong Chen,†Xinyang Feng,‡∗Cristian Lumezanu,†Wei Cheng,†Jingchao Ni,†Bo Zong,†Haifeng Chen,†Nitesh V. Chawla
 # Implementation of Multi-Scale Convolutional Recurrent Encoder-Decoder (MSCRED) for Anomaly Detection and Diagnosis in Multivariate Time Series
+# Original Impl.: https://github.com/7fantasysz/MSCRED/blob/master/code/MSCRED_TF.py
 
 class MSCRED(tf.keras.Model):
 
@@ -80,68 +81,97 @@ class MSCRED(tf.keras.Model):
             x_endcoded_4_CLSTM = convLISTM_layer4(x_endcoded_4)
 
             if use_attention:
-                ## Attention for x_endcoded_4_CLSTM
-                # Flatten to vector
-                x_endcoded_4_CLSTM_flatten = tf.keras.layers.Reshape((config.step_max,8*8*config.filter_dimension_encoder[3]), name="Flatten_ConvLSTM_4")(x_endcoded_4_CLSTM)
-                # x_endcoded_1_CLSTM_flatten: [?,5,16384]
-                x_endcoded_4_CLSTM_last_time_step = tf.keras.layers.Lambda(lambda x: x[:,config.step_max-1,:], name="Last_TS_ConvLSTM_4")(x_endcoded_4_CLSTM_flatten)
-                x_endcoded_4_CLSTM_last_time_step_5 = tf.keras.layers.RepeatVector(config.step_max, name="Repeated_Last_TS_ConvLSTM_4")(x_endcoded_4_CLSTM_last_time_step)
-                #x_endcoded_4_CLSTM_scores = tf.matmul(x_endcoded_4_CLSTM_flatten, x_endcoded_4_CLSTM_last_time_step, transpose_b=True, name="Scores_ConvLSTM_4")
-                x_endcoded_4_CLSTM_scores = tf.reduce_sum(tf.reduce_sum(tf.multiply(x_endcoded_4_CLSTM_flatten, x_endcoded_4_CLSTM_last_time_step_5) ,axis=2, keepdims=True),axis=2)
-                #x_endcoded_4_CLSTM_scores = tf.squeeze(x_endcoded_4_CLSTM_scores, name="Squeeze_Scores_ConvLSTM_4")
-                x_endcoded_4_CLSTM_attention = tf.nn.softmax(x_endcoded_4_CLSTM_scores, name="Attention_ConvLSTM_4")
-                x_endcoded_4_CLSTM_attention_repeated = tf.keras.layers.RepeatVector(8*8*config.filter_dimension_encoder[3], name="Repeated_Attention_ConvLSTM_4")(x_endcoded_4_CLSTM_attention)
-                x_endcoded_4_CLSTM_attention_repeated_T = tf.keras.backend.permute_dimensions(x_endcoded_4_CLSTM_attention_repeated, pattern=(0,2, 1))
-                x_endcoded_4_CLSTM_flatten = tf.multiply(x_endcoded_4_CLSTM_attention_repeated_T, x_endcoded_4_CLSTM_flatten, name="Apply_Att_ConvLSTM_4")
-                x_endcoded_4_CLSTM_flatten = tf.reduce_sum(x_endcoded_4_CLSTM_flatten, axis= 1, name="Apply_Att_ConvLSTM_4")
-                x_endcoded_4_CLSTM = tf.keras.layers.Reshape(( 8, 8, config.filter_dimension_encoder[3]),name="Reshape_ToOrignal_ConvLSTM_4")(x_endcoded_4_CLSTM_flatten)
+                if config.keras_attention_layer_instead_of_own_impl:
 
-                ## Attention for x_endcoded_3_CLSTM
-                # Flatten to vector
-                x_endcoded_3_CLSTM_flatten = tf.keras.layers.Reshape((config.step_max,16*16*config.filter_dimension_encoder[2]), name="Flatten_ConvLSTM_3")(x_endcoded_3_CLSTM)
-                # x_endcoded_1_CLSTM_flatten: [?,5,16384]
-                x_endcoded_3_CLSTM_last_time_step = tf.keras.layers.Lambda(lambda x: x[:,4,:], name="Last_TS_ConvLSTM_3")(x_endcoded_3_CLSTM_flatten)
-                x_endcoded_3_CLSTM_last_time_step_5 = tf.keras.layers.RepeatVector(config.step_max, name="Repeated_Last_TS_ConvLSTM_3")(
-                    x_endcoded_3_CLSTM_last_time_step)
-                x_endcoded_3_CLSTM_scores = tf.reduce_sum(
-                    tf.reduce_sum(tf.multiply(x_endcoded_3_CLSTM_flatten, x_endcoded_3_CLSTM_last_time_step_5), axis=2,
-                                  keepdims=True), axis=2)
-                x_endcoded_3_CLSTM_attention = tf.nn.softmax(x_endcoded_3_CLSTM_scores, name="Attention_ConvLSTM_3")
-                x_endcoded_3_CLSTM_attention_repeated = tf.keras.layers.RepeatVector(16 * 16 * config.filter_dimension_encoder[2], name="Repeated_Attention_ConvLSTM_3")(x_endcoded_3_CLSTM_attention)
-                x_endcoded_3_CLSTM_attention_repeated_T = tf.keras.backend.permute_dimensions(x_endcoded_3_CLSTM_attention_repeated, pattern=(0, 2, 1))
-                x_endcoded_3_CLSTM_flatten = tf.multiply(x_endcoded_3_CLSTM_attention_repeated_T, x_endcoded_3_CLSTM_flatten,name="Apply_Att_ConvLSTM_3")
-                x_endcoded_3_CLSTM_flatten = tf.reduce_sum(x_endcoded_3_CLSTM_flatten, axis=1, name="Apply_Att_ConvLSTM_3")
-                x_endcoded_3_CLSTM = tf.keras.layers.Reshape((16, 16, config.filter_dimension_encoder[2]),name="Reshape_ToOrignal_ConvLSTM_3")(x_endcoded_3_CLSTM_flatten)
+                    # Flatten to get (batchsize,Tq,dim)
+                    x_endcoded_4_CLSTM_flatten = tf.keras.layers.Reshape((config.step_max, 8  * 8  * config.filter_dimension_encoder[3]), name="Flatten_ConvLSTM_4_Tq")(x_endcoded_4_CLSTM)
+                    x_endcoded_3_CLSTM_flatten = tf.keras.layers.Reshape((config.step_max, 16 * 16 * config.filter_dimension_encoder[2]), name="Flatten_ConvLSTM_3_Tq")(x_endcoded_3_CLSTM)
+                    x_endcoded_2_CLSTM_flatten = tf.keras.layers.Reshape((config.step_max, 31 * 31 * config.filter_dimension_encoder[1]), name="Flatten_ConvLSTM_2_Tq")(x_endcoded_2_CLSTM)
+                    x_endcoded_1_CLSTM_flatten = tf.keras.layers.Reshape((config.step_max, 61 * 61 * config.filter_dimension_encoder[0]), name="Flatten_ConvLSTM_1_Tq")(x_endcoded_1_CLSTM)
+                    # Flatten to get (batchsize,Tv,dim)
+                    x_endcoded_4_CLSTM_flatten_Tv = tf.keras.layers.Reshape((1, 8  * 8  * config.filter_dimension_encoder[3]), name="Flatten_ConvLSTM_4_Tv")(x_endcoded_4_CLSTM_flatten[:, config.step_max - 1, :])
+                    x_endcoded_3_CLSTM_flatten_Tv = tf.keras.layers.Reshape((1, 16 * 16 * config.filter_dimension_encoder[2]), name="Flatten_ConvLSTM_3_Tv")(x_endcoded_3_CLSTM_flatten[:, config.step_max - 1, :])
+                    x_endcoded_2_CLSTM_flatten_Tv = tf.keras.layers.Reshape((1, 31 * 31 * config.filter_dimension_encoder[1]), name="Flatten_ConvLSTM_2_Tv")(x_endcoded_2_CLSTM_flatten[:, config.step_max - 1, :])
+                    x_endcoded_1_CLSTM_flatten_Tv = tf.keras.layers.Reshape((1, 61 * 61 * config.filter_dimension_encoder[0]), name="Flatten_ConvLSTM_1_Tv")(x_endcoded_1_CLSTM_flatten[:, config.step_max - 1, :])
 
-                ## Attention for x_endcoded_2_CLSTM
-                # Flatten to vector
-                x_endcoded_2_CLSTM_flatten = tf.keras.layers.Reshape((config.step_max,31*31*config.filter_dimension_encoder[1]), name="Flatten_ConvLSTM_2")(x_endcoded_2_CLSTM)
-                # x_endcoded_1_CLSTM_flatten: [?,5,16384]
-                x_endcoded_2_CLSTM_last_time_step = tf.keras.layers.Lambda(lambda x: x[:,4,:], name="Last_TS_ConvLSTM_2")(x_endcoded_2_CLSTM_flatten)
-                x_endcoded_2_CLSTM_last_time_step_5 = tf.keras.layers.RepeatVector(config.step_max, name="Repeated_Last_TS_ConvLSTM_2")(x_endcoded_2_CLSTM_last_time_step)
-                x_endcoded_2_CLSTM_scores = tf.reduce_sum(tf.reduce_sum(tf.multiply(x_endcoded_2_CLSTM_flatten, x_endcoded_2_CLSTM_last_time_step_5), axis=2,
-                                  keepdims=True), axis=2)
-                x_endcoded_2_CLSTM_attention = tf.nn.softmax(x_endcoded_2_CLSTM_scores, name="Attention_ConvLSTM_2")
-                x_endcoded_2_CLSTM_attention_repeated = tf.keras.layers.RepeatVector(31 * 31 * config.filter_dimension_encoder[1], name="Repeated_Attention_ConvLSTM_2")(x_endcoded_2_CLSTM_attention)
-                x_endcoded_2_CLSTM_attention_repeated_T = tf.keras.backend.permute_dimensions(x_endcoded_2_CLSTM_attention_repeated, pattern=(0, 2, 1))
-                x_endcoded_2_CLSTM_flatten = tf.multiply(x_endcoded_2_CLSTM_attention_repeated_T, x_endcoded_2_CLSTM_flatten,name="Apply_Att_ConvLSTM_2")
-                x_endcoded_2_CLSTM_flatten = tf.reduce_sum(x_endcoded_2_CLSTM_flatten, axis=1, name="Apply_Att_ConvLSTM_2")
-                x_endcoded_2_CLSTM = tf.keras.layers.Reshape((31, 31, config.filter_dimension_encoder[1]),name="Reshape_ToOrignal_ConvLSTM_2")(x_endcoded_2_CLSTM_flatten)
+                    # Applying attention after reshaping the input into required format
+                    x_endcoded_4_CLSTM = tf.keras.layers.Attention()([x_endcoded_4_CLSTM_flatten_Tv, x_endcoded_4_CLSTM_flatten])
+                    x_endcoded_3_CLSTM = tf.keras.layers.Attention()([x_endcoded_3_CLSTM_flatten_Tv, x_endcoded_3_CLSTM_flatten])
+                    x_endcoded_2_CLSTM = tf.keras.layers.Attention()([x_endcoded_2_CLSTM_flatten_Tv, x_endcoded_2_CLSTM_flatten])
+                    x_endcoded_1_CLSTM = tf.keras.layers.Attention()([x_endcoded_1_CLSTM_flatten_Tv, x_endcoded_1_CLSTM_flatten])
 
-                ## Attention for x_endcoded_1_CLSTM
-                # Flatten to vector
-                x_endcoded_1_CLSTM_flatten = tf.keras.layers.Reshape((config.step_max,61*61*config.filter_dimension_encoder[0]), name="Flatten_ConvLSTM_1")(x_endcoded_1_CLSTM)
-                # x_endcoded_1_CLSTM_flatten: [?,5,16384]
-                x_endcoded_1_CLSTM_last_time_step = tf.keras.layers.Lambda(lambda x: x[:,4,:], name="Last_TS_ConvLSTM_1")(x_endcoded_1_CLSTM_flatten)
-                x_endcoded_1_CLSTM_last_time_step_5 = tf.keras.layers.RepeatVector(config.step_max, name="Repeated_Last_TS_ConvLSTM_1")(x_endcoded_1_CLSTM_last_time_step)
-                x_endcoded_1_CLSTM_scores = tf.reduce_sum(tf.reduce_sum(tf.multiply(x_endcoded_1_CLSTM_flatten, x_endcoded_1_CLSTM_last_time_step_5), axis=2,
-                                  keepdims=True), axis=2)
-                x_endcoded_1_CLSTM_attention = tf.nn.softmax(x_endcoded_1_CLSTM_scores, name="Attention_ConvLSTM_1")
-                x_endcoded_1_CLSTM_attention_repeated = tf.keras.layers.RepeatVector(61 * 61 * config.filter_dimension_encoder[0], name="Repeated_Attention_ConvLSTM_1")(x_endcoded_1_CLSTM_attention)
-                x_endcoded_1_CLSTM_attention_repeated_T = tf.keras.backend.permute_dimensions(x_endcoded_1_CLSTM_attention_repeated, pattern=(0, 2, 1))
-                x_endcoded_1_CLSTM_flatten = tf.multiply(x_endcoded_1_CLSTM_attention_repeated_T, x_endcoded_1_CLSTM_flatten,name="Apply_Att_ConvLSTM_1")
-                x_endcoded_1_CLSTM_flatten = tf.reduce_sum(x_endcoded_1_CLSTM_flatten, axis=1, name="Apply_Att_ConvLSTM_1")
-                x_endcoded_1_CLSTM = tf.keras.layers.Reshape((61, 61, config.filter_dimension_encoder[0]),name="Reshape_ToOrignal_ConvLSTM_1")(x_endcoded_1_CLSTM_flatten)
+                    # Reshape back again into original shape
+                    x_endcoded_4_CLSTM = tf.keras.layers.Reshape((8, 8, config.filter_dimension_encoder[3]),
+                                                                 name="Reshape_ToOrignal_ConvLSTM_4")(x_endcoded_4_CLSTM)
+                    x_endcoded_3_CLSTM = tf.keras.layers.Reshape((16, 16, config.filter_dimension_encoder[2]),
+                                                                 name="Reshape_ToOrignal_ConvLSTM_3")(x_endcoded_3_CLSTM)
+                    x_endcoded_2_CLSTM = tf.keras.layers.Reshape((31, 31, config.filter_dimension_encoder[1]),
+                                                                 name="Reshape_ToOrignal_ConvLSTM_2")(x_endcoded_2_CLSTM)
+                    x_endcoded_1_CLSTM = tf.keras.layers.Reshape((61, 61, config.filter_dimension_encoder[0]),
+                                                                 name="Reshape_ToOrignal_ConvLSTM_1")(x_endcoded_1_CLSTM)
+                else:
+                    ## Attention for x_endcoded_4_CLSTM
+                    # Flatten to vector
+                    x_endcoded_4_CLSTM_flatten = tf.keras.layers.Reshape((config.step_max,8*8*config.filter_dimension_encoder[3]), name="Flatten_ConvLSTM_4")(x_endcoded_4_CLSTM)
+                    # x_endcoded_1_CLSTM_flatten: [?,5,16384]
+                    x_endcoded_4_CLSTM_last_time_step = tf.keras.layers.Lambda(lambda x: x[:,config.step_max-1,:], name="Last_TS_ConvLSTM_4")(x_endcoded_4_CLSTM_flatten)
+                    x_endcoded_4_CLSTM_last_time_step_5 = tf.keras.layers.RepeatVector(config.step_max, name="Repeated_Last_TS_ConvLSTM_4")(x_endcoded_4_CLSTM_last_time_step)
+                    #x_endcoded_4_CLSTM_scores = tf.matmul(x_endcoded_4_CLSTM_flatten, x_endcoded_4_CLSTM_last_time_step, transpose_b=True, name="Scores_ConvLSTM_4")
+                    x_endcoded_4_CLSTM_scores = tf.reduce_sum(tf.reduce_sum(tf.multiply(x_endcoded_4_CLSTM_flatten, x_endcoded_4_CLSTM_last_time_step_5) ,axis=2, keepdims=True),axis=2)
+                    #x_endcoded_4_CLSTM_scores = tf.squeeze(x_endcoded_4_CLSTM_scores, name="Squeeze_Scores_ConvLSTM_4")
+                    x_endcoded_4_CLSTM_attention = tf.nn.softmax(x_endcoded_4_CLSTM_scores, name="Attention_ConvLSTM_4")
+                    x_endcoded_4_CLSTM_attention_repeated = tf.keras.layers.RepeatVector(8*8*config.filter_dimension_encoder[3], name="Repeated_Attention_ConvLSTM_4")(x_endcoded_4_CLSTM_attention)
+                    x_endcoded_4_CLSTM_attention_repeated_T = tf.keras.backend.permute_dimensions(x_endcoded_4_CLSTM_attention_repeated, pattern=(0,2, 1))
+                    x_endcoded_4_CLSTM_flatten = tf.multiply(x_endcoded_4_CLSTM_attention_repeated_T, x_endcoded_4_CLSTM_flatten, name="Apply_Att_ConvLSTM_4")
+                    x_endcoded_4_CLSTM_flatten = tf.reduce_sum(x_endcoded_4_CLSTM_flatten, axis= 1, name="Apply_Att_ConvLSTM_4")
+                    x_endcoded_4_CLSTM = tf.keras.layers.Reshape(( 8, 8, config.filter_dimension_encoder[3]),name="Reshape_ToOrignal_ConvLSTM_4")(x_endcoded_4_CLSTM_flatten)
+
+                    ## Attention for x_endcoded_3_CLSTM
+                    # Flatten to vector
+                    x_endcoded_3_CLSTM_flatten = tf.keras.layers.Reshape((config.step_max,16*16*config.filter_dimension_encoder[2]), name="Flatten_ConvLSTM_3")(x_endcoded_3_CLSTM)
+                    # x_endcoded_1_CLSTM_flatten: [?,5,16384]
+                    x_endcoded_3_CLSTM_last_time_step = tf.keras.layers.Lambda(lambda x: x[:,4,:], name="Last_TS_ConvLSTM_3")(x_endcoded_3_CLSTM_flatten)
+                    x_endcoded_3_CLSTM_last_time_step_5 = tf.keras.layers.RepeatVector(config.step_max, name="Repeated_Last_TS_ConvLSTM_3")(
+                        x_endcoded_3_CLSTM_last_time_step)
+                    x_endcoded_3_CLSTM_scores = tf.reduce_sum(
+                        tf.reduce_sum(tf.multiply(x_endcoded_3_CLSTM_flatten, x_endcoded_3_CLSTM_last_time_step_5), axis=2,
+                                      keepdims=True), axis=2)
+                    x_endcoded_3_CLSTM_attention = tf.nn.softmax(x_endcoded_3_CLSTM_scores, name="Attention_ConvLSTM_3")
+                    x_endcoded_3_CLSTM_attention_repeated = tf.keras.layers.RepeatVector(16 * 16 * config.filter_dimension_encoder[2], name="Repeated_Attention_ConvLSTM_3")(x_endcoded_3_CLSTM_attention)
+                    x_endcoded_3_CLSTM_attention_repeated_T = tf.keras.backend.permute_dimensions(x_endcoded_3_CLSTM_attention_repeated, pattern=(0, 2, 1))
+                    x_endcoded_3_CLSTM_flatten = tf.multiply(x_endcoded_3_CLSTM_attention_repeated_T, x_endcoded_3_CLSTM_flatten,name="Apply_Att_ConvLSTM_3")
+                    x_endcoded_3_CLSTM_flatten = tf.reduce_sum(x_endcoded_3_CLSTM_flatten, axis=1, name="Apply_Att_ConvLSTM_3")
+                    x_endcoded_3_CLSTM = tf.keras.layers.Reshape((16, 16, config.filter_dimension_encoder[2]),name="Reshape_ToOrignal_ConvLSTM_3")(x_endcoded_3_CLSTM_flatten)
+
+                    ## Attention for x_endcoded_2_CLSTM
+                    # Flatten to vector
+                    x_endcoded_2_CLSTM_flatten = tf.keras.layers.Reshape((config.step_max,31*31*config.filter_dimension_encoder[1]), name="Flatten_ConvLSTM_2")(x_endcoded_2_CLSTM)
+                    # x_endcoded_1_CLSTM_flatten: [?,5,16384]
+                    x_endcoded_2_CLSTM_last_time_step = tf.keras.layers.Lambda(lambda x: x[:,4,:], name="Last_TS_ConvLSTM_2")(x_endcoded_2_CLSTM_flatten)
+                    x_endcoded_2_CLSTM_last_time_step_5 = tf.keras.layers.RepeatVector(config.step_max, name="Repeated_Last_TS_ConvLSTM_2")(x_endcoded_2_CLSTM_last_time_step)
+                    x_endcoded_2_CLSTM_scores = tf.reduce_sum(tf.reduce_sum(tf.multiply(x_endcoded_2_CLSTM_flatten, x_endcoded_2_CLSTM_last_time_step_5), axis=2,
+                                      keepdims=True), axis=2)
+                    x_endcoded_2_CLSTM_attention = tf.nn.softmax(x_endcoded_2_CLSTM_scores, name="Attention_ConvLSTM_2")
+                    x_endcoded_2_CLSTM_attention_repeated = tf.keras.layers.RepeatVector(31 * 31 * config.filter_dimension_encoder[1], name="Repeated_Attention_ConvLSTM_2")(x_endcoded_2_CLSTM_attention)
+                    x_endcoded_2_CLSTM_attention_repeated_T = tf.keras.backend.permute_dimensions(x_endcoded_2_CLSTM_attention_repeated, pattern=(0, 2, 1))
+                    x_endcoded_2_CLSTM_flatten = tf.multiply(x_endcoded_2_CLSTM_attention_repeated_T, x_endcoded_2_CLSTM_flatten,name="Apply_Att_ConvLSTM_2")
+                    x_endcoded_2_CLSTM_flatten = tf.reduce_sum(x_endcoded_2_CLSTM_flatten, axis=1, name="Apply_Att_ConvLSTM_2")
+                    x_endcoded_2_CLSTM = tf.keras.layers.Reshape((31, 31, config.filter_dimension_encoder[1]),name="Reshape_ToOrignal_ConvLSTM_2")(x_endcoded_2_CLSTM_flatten)
+
+                    ## Attention for x_endcoded_1_CLSTM
+                    # Flatten to vector
+                    x_endcoded_1_CLSTM_flatten = tf.keras.layers.Reshape((config.step_max,61*61*config.filter_dimension_encoder[0]), name="Flatten_ConvLSTM_1")(x_endcoded_1_CLSTM)
+                    # x_endcoded_1_CLSTM_flatten: [?,5,16384]
+                    x_endcoded_1_CLSTM_last_time_step = tf.keras.layers.Lambda(lambda x: x[:,4,:], name="Last_TS_ConvLSTM_1")(x_endcoded_1_CLSTM_flatten)
+                    x_endcoded_1_CLSTM_last_time_step_5 = tf.keras.layers.RepeatVector(config.step_max, name="Repeated_Last_TS_ConvLSTM_1")(x_endcoded_1_CLSTM_last_time_step)
+                    x_endcoded_1_CLSTM_scores = tf.reduce_sum(tf.reduce_sum(tf.multiply(x_endcoded_1_CLSTM_flatten, x_endcoded_1_CLSTM_last_time_step_5), axis=2,
+                                      keepdims=True), axis=2)
+                    x_endcoded_1_CLSTM_attention = tf.nn.softmax(x_endcoded_1_CLSTM_scores, name="Attention_ConvLSTM_1")
+                    x_endcoded_1_CLSTM_attention_repeated = tf.keras.layers.RepeatVector(61 * 61 * config.filter_dimension_encoder[0], name="Repeated_Attention_ConvLSTM_1")(x_endcoded_1_CLSTM_attention)
+                    x_endcoded_1_CLSTM_attention_repeated_T = tf.keras.backend.permute_dimensions(x_endcoded_1_CLSTM_attention_repeated, pattern=(0, 2, 1))
+                    x_endcoded_1_CLSTM_flatten = tf.multiply(x_endcoded_1_CLSTM_attention_repeated_T, x_endcoded_1_CLSTM_flatten,name="Apply_Att_ConvLSTM_1")
+                    x_endcoded_1_CLSTM_flatten = tf.reduce_sum(x_endcoded_1_CLSTM_flatten, axis=1, name="Apply_Att_ConvLSTM_1")
+                    x_endcoded_1_CLSTM = tf.keras.layers.Reshape((61, 61, config.filter_dimension_encoder[0]),name="Reshape_ToOrignal_ConvLSTM_1")(x_endcoded_1_CLSTM_flatten)
             else:
                 print("Use Attention: ",use_attention,", instead last ConvLSTM Sequence output is used for reconstruction")
             if use_memory_restriction:
@@ -181,8 +211,6 @@ class MSCRED(tf.keras.Model):
                     x_endcoded_1_CLSTM_flatten)
 
             if use_encoded_output:
-                ### Regularized siamese neural network for unsupervised outlier detection on brain multiparametric magenetic
-                # resonance imaging: application to epilepsy lesion screening
                 hidden_rep = tf.keras.layers.Reshape((8 * 8 * 256,), name="Flatten_Conv4_HiddenRep_Sim")(x_endcoded_4_CLSTM)
             # Decoder
             # DeConv4 (Conv2DTranspose)    (None, 16, 16, 128)
@@ -262,556 +290,7 @@ class MSCRED(tf.keras.Model):
 
         return model
 
-class MSCRED_with_LatentOutput(tf.keras.Model):
-
-    def __init__(self):
-
-        super(MSCRED_with_LatentOutput, self).__init__()
-
-
-    def create_model(self):
-        print("create model!")
-
-        signatureMatrixInput = tf.keras.Input(shape=(5, 61, 61, config.dim_of_dataset), batch_size=config.batch_size, name="Input0")
-
-        conv2d_layer1 = tf.keras.layers.Conv2D(filters=32, strides=[1, 1], kernel_size=[3, 3],
-                                               padding='same',
-                                               activation='selu')
-        conv2d_layer2 = tf.keras.layers.Conv2D(filters=64, strides=[2, 2], kernel_size=[3, 3],
-                                               padding='same',
-                                               activation='selu')
-        conv2d_layer3 = tf.keras.layers.Conv2D(filters=128, strides=[2, 2], kernel_size=[2, 2],
-                                               padding='same',
-                                               activation='selu')
-        conv2d_layer4 = tf.keras.layers.Conv2D(filters=256, strides=[2, 2], kernel_size=[2, 2],
-                                               padding='same',
-                                               activation='selu')
-        convLISTM_layer1 = tf.keras.layers.ConvLSTM2D(filters=32, strides=1, kernel_size=[2, 2], padding='same',
-                                                      return_sequences=True, name="ConvLSTM1")
-        convLISTM_layer2 = tf.keras.layers.ConvLSTM2D(filters=64, strides=1, kernel_size=[2, 2], padding='same',
-                                                      return_sequences=True, name="ConvLSTM2")
-
-        convLISTM_layer3 = tf.keras.layers.ConvLSTM2D(filters=128, strides=1, kernel_size=[2, 2], padding='same',
-                                                      return_sequences=True, name="ConvLSTM3")
-
-        convLISTM_layer4 = tf.keras.layers.ConvLSTM2D(filters=256, strides=1, kernel_size=[2, 2], padding='same',
-                                                      return_sequences=True, name="ConvLSTM4")
-
-        conv2d_trans_layer4 = tf.keras.layers.Conv2DTranspose(filters=128, strides=[2, 2],
-                                                              kernel_size=[2, 2], padding='same',
-                                                              activation='selu', name="DeConv4")
-        conv2d_trans_layer3 = tf.keras.layers.Conv2DTranspose(filters=64, strides=[2, 2],
-                                                              kernel_size=[2, 2], padding='same',
-                                                              activation='selu', output_padding=1)
-        conv2d_trans_layer2 = tf.keras.layers.Conv2DTranspose(filters=32, strides=[2, 2],
-                                                              kernel_size=[3, 3], padding='same',
-                                                              activation='selu', output_padding=0)
-        conv2d_trans_layer1 = tf.keras.layers.Conv2DTranspose(filters=config.dim_of_dataset, strides=[1, 1],
-                                                              kernel_size=[3, 3], padding='same',
-                                                              activation='selu')
-
-        x_endcoded_1 = tf.keras.layers.TimeDistributed(conv2d_layer1, name="Conv1")(signatureMatrixInput)
-        x_endcoded_2 = tf.keras.layers.TimeDistributed(conv2d_layer2, name="Conv2")(x_endcoded_1)
-        x_endcoded_3 = tf.keras.layers.TimeDistributed(conv2d_layer3, name="Conv3")(x_endcoded_2)
-        x_endcoded_4 = tf.keras.layers.TimeDistributed(conv2d_layer4, name="Conv4")(x_endcoded_3)
-
-        x_endcoded_1_CLSTM = convLISTM_layer1(x_endcoded_1)
-        x_endcoded_2_CLSTM = convLISTM_layer2(x_endcoded_2)
-        x_endcoded_3_CLSTM = convLISTM_layer3(x_endcoded_3)
-        x_endcoded_4_CLSTM = convLISTM_layer4(x_endcoded_4)
-
-        ### Regularized siamese neural network for unsupervised outlier detection on brain multiparametric magenetic
-        # resonance imaging: application to epilepsy lesion screening
-
-        #hidden_rep = tf.keras.layers.Reshape((5 * 8 * 8 * 256,), name="Flatten_Conv4_HiddenRep")(x_endcoded_4)
-
-        x_endcoded_4_CLSTM_hidden = tf.keras.layers.Lambda(lambda x: x[:, 4, :, :, :], name="Getting_Conv4_HiddenRep")(
-            x_endcoded_4_CLSTM)
-        hidden_rep = tf.keras.layers.Reshape(( 8 * 8 * 256,), name="Flatten_Conv4_HiddenRep")(x_endcoded_4_CLSTM_hidden)
-
-
-        ### Attention ###
-        ## Attention for x_endcoded_4_CLSTM
-        # Flatten to vector
-        x_endcoded_4_CLSTM_flatten = tf.keras.layers.Reshape((5,8*8*256), name="Flatten_ConvLSTM_4")(x_endcoded_4_CLSTM)
-        # x_endcoded_1_CLSTM_flatten: [?,5,16384]
-        x_endcoded_4_CLSTM_last_time_step = tf.keras.layers.Lambda(lambda x: x[:,4,:], name="Last_TS_ConvLSTM_4")(x_endcoded_4_CLSTM_flatten)
-        x_endcoded_4_CLSTM_last_time_step_5 = tf.keras.layers.RepeatVector(5, name="Repeated_Last_TS_ConvLSTM_4")(x_endcoded_4_CLSTM_last_time_step)
-        #x_endcoded_4_CLSTM_scores = tf.matmul(x_endcoded_4_CLSTM_flatten, x_endcoded_4_CLSTM_last_time_step, transpose_b=True, name="Scores_ConvLSTM_4")
-        x_endcoded_4_CLSTM_scores = tf.reduce_sum(tf.reduce_sum(tf.multiply(x_endcoded_4_CLSTM_flatten, x_endcoded_4_CLSTM_last_time_step_5) ,axis=2, keepdims=True),axis=2)
-        #x_endcoded_4_CLSTM_scores = tf.squeeze(x_endcoded_4_CLSTM_scores, name="Squeeze_Scores_ConvLSTM_4")
-        x_endcoded_4_CLSTM_attention = tf.nn.softmax(x_endcoded_4_CLSTM_scores, name="Attention_ConvLSTM_4")
-        x_endcoded_4_CLSTM_attention_repeated = tf.keras.layers.RepeatVector(8*8*256, name="Repeated_Attention_ConvLSTM_4")(x_endcoded_4_CLSTM_attention)
-        x_endcoded_4_CLSTM_attention_repeated_T = tf.keras.backend.permute_dimensions(x_endcoded_4_CLSTM_attention_repeated, pattern=(0,2, 1))
-        x_endcoded_4_CLSTM_flatten = tf.multiply(x_endcoded_4_CLSTM_attention_repeated_T, x_endcoded_4_CLSTM_flatten, name="Apply_Att_ConvLSTM_4")
-        x_endcoded_4_CLSTM_flatten = tf.reduce_sum(x_endcoded_4_CLSTM_flatten, axis= 1, name="Apply_Att_ConvLSTM_4")
-        x_endcoded_4_CLSTM = tf.keras.layers.Reshape(( 8, 8, 256),name="Reshape_ToOrignal_ConvLSTM_4")(x_endcoded_4_CLSTM_flatten)
-
-        ## Attention for x_endcoded_3_CLSTM
-        # Flatten to vector
-        x_endcoded_3_CLSTM_flatten = tf.keras.layers.Reshape((5,16*16*128), name="Flatten_ConvLSTM_3")(x_endcoded_3_CLSTM)
-        # x_endcoded_1_CLSTM_flatten: [?,5,16384]
-        x_endcoded_3_CLSTM_last_time_step = tf.keras.layers.Lambda(lambda x: x[:,4,:], name="Last_TS_ConvLSTM_3")(x_endcoded_3_CLSTM_flatten)
-        x_endcoded_3_CLSTM_last_time_step_5 = tf.keras.layers.RepeatVector(5, name="Repeated_Last_TS_ConvLSTM_3")(
-            x_endcoded_3_CLSTM_last_time_step)
-        x_endcoded_3_CLSTM_scores = tf.reduce_sum(
-            tf.reduce_sum(tf.multiply(x_endcoded_3_CLSTM_flatten, x_endcoded_3_CLSTM_last_time_step_5), axis=2,
-                          keepdims=True), axis=2)
-        x_endcoded_3_CLSTM_attention = tf.nn.softmax(x_endcoded_3_CLSTM_scores, name="Attention_ConvLSTM_3")
-        x_endcoded_3_CLSTM_attention_repeated = tf.keras.layers.RepeatVector(16 * 16 * 128, name="Repeated_Attention_ConvLSTM_3")(x_endcoded_3_CLSTM_attention)
-        x_endcoded_3_CLSTM_attention_repeated_T = tf.keras.backend.permute_dimensions(x_endcoded_3_CLSTM_attention_repeated, pattern=(0, 2, 1))
-        x_endcoded_3_CLSTM_flatten = tf.multiply(x_endcoded_3_CLSTM_attention_repeated_T, x_endcoded_3_CLSTM_flatten,name="Apply_Att_ConvLSTM_3")
-        x_endcoded_3_CLSTM_flatten = tf.reduce_sum(x_endcoded_3_CLSTM_flatten, axis=1, name="Apply_Att_ConvLSTM_3")
-        x_endcoded_3_CLSTM = tf.keras.layers.Reshape((16, 16, 128),name="Reshape_ToOrignal_ConvLSTM_3")(x_endcoded_3_CLSTM_flatten)
-
-        ## Attention for x_endcoded_2_CLSTM
-        # Flatten to vector
-        x_endcoded_2_CLSTM_flatten = tf.keras.layers.Reshape((5,31*31*64), name="Flatten_ConvLSTM_2")(x_endcoded_2_CLSTM)
-        # x_endcoded_1_CLSTM_flatten: [?,5,16384]
-        x_endcoded_2_CLSTM_last_time_step = tf.keras.layers.Lambda(lambda x: x[:,4,:], name="Last_TS_ConvLSTM_2")(x_endcoded_2_CLSTM_flatten)
-        x_endcoded_2_CLSTM_last_time_step_5 = tf.keras.layers.RepeatVector(5, name="Repeated_Last_TS_ConvLSTM_2")(x_endcoded_2_CLSTM_last_time_step)
-        x_endcoded_2_CLSTM_scores = tf.reduce_sum(tf.reduce_sum(tf.multiply(x_endcoded_2_CLSTM_flatten, x_endcoded_2_CLSTM_last_time_step_5), axis=2,
-                          keepdims=True), axis=2)
-        x_endcoded_2_CLSTM_attention = tf.nn.softmax(x_endcoded_2_CLSTM_scores, name="Attention_ConvLSTM_2")
-        x_endcoded_2_CLSTM_attention_repeated = tf.keras.layers.RepeatVector(31 * 31 * 64, name="Repeated_Attention_ConvLSTM_2")(x_endcoded_2_CLSTM_attention)
-        x_endcoded_2_CLSTM_attention_repeated_T = tf.keras.backend.permute_dimensions(x_endcoded_2_CLSTM_attention_repeated, pattern=(0, 2, 1))
-        x_endcoded_2_CLSTM_flatten = tf.multiply(x_endcoded_2_CLSTM_attention_repeated_T, x_endcoded_2_CLSTM_flatten,name="Apply_Att_ConvLSTM_2")
-        x_endcoded_2_CLSTM_flatten = tf.reduce_sum(x_endcoded_2_CLSTM_flatten, axis=1, name="Apply_Att_ConvLSTM_2")
-        x_endcoded_2_CLSTM = tf.keras.layers.Reshape((31, 31, 64),name="Reshape_ToOrignal_ConvLSTM_2")(x_endcoded_2_CLSTM_flatten)
-
-        ## Attention for x_endcoded_1_CLSTM
-        # Flatten to vector
-        x_endcoded_1_CLSTM_flatten = tf.keras.layers.Reshape((5,61*61*32), name="Flatten_ConvLSTM_1")(x_endcoded_1_CLSTM)
-        # x_endcoded_1_CLSTM_flatten: [?,5,16384]
-        x_endcoded_1_CLSTM_last_time_step = tf.keras.layers.Lambda(lambda x: x[:,4,:], name="Last_TS_ConvLSTM_1")(x_endcoded_1_CLSTM_flatten)
-        x_endcoded_1_CLSTM_last_time_step_5 = tf.keras.layers.RepeatVector(5, name="Repeated_Last_TS_ConvLSTM_1")(x_endcoded_1_CLSTM_last_time_step)
-        x_endcoded_1_CLSTM_scores = tf.reduce_sum(tf.reduce_sum(tf.multiply(x_endcoded_1_CLSTM_flatten, x_endcoded_1_CLSTM_last_time_step_5), axis=2,
-                          keepdims=True), axis=2)
-        x_endcoded_1_CLSTM_attention = tf.nn.softmax(x_endcoded_1_CLSTM_scores, name="Attention_ConvLSTM_1")
-        x_endcoded_1_CLSTM_attention_repeated = tf.keras.layers.RepeatVector(61 * 61 * 32, name="Repeated_Attention_ConvLSTM_1")(x_endcoded_1_CLSTM_attention)
-        x_endcoded_1_CLSTM_attention_repeated_T = tf.keras.backend.permute_dimensions(x_endcoded_1_CLSTM_attention_repeated, pattern=(0, 2, 1))
-        x_endcoded_1_CLSTM_flatten = tf.multiply(x_endcoded_1_CLSTM_attention_repeated_T, x_endcoded_1_CLSTM_flatten,name="Apply_Att_ConvLSTM_1")
-        x_endcoded_1_CLSTM_flatten = tf.reduce_sum(x_endcoded_1_CLSTM_flatten, axis=1, name="Apply_Att_ConvLSTM_1")
-        x_endcoded_1_CLSTM = tf.keras.layers.Reshape((61, 61, 32),name="Reshape_ToOrignal_ConvLSTM_1")(x_endcoded_1_CLSTM_flatten)
-
-        #x_dedcoded_3 = tf.keras.layers.TimeDistributed(conv2d_trans_layer4, name="DeConv4")(x_endcoded_4_CLSTM)
-
-        #x_endcoded_4_CLSTM = tf.keras.layers.Lambda(lambda x: x[:, 4, :, :, :], name="Last_TS_ConvLSTM_4")(x_endcoded_4_CLSTM)
-        #x_endcoded_3_CLSTM = tf.keras.layers.Lambda(lambda x: x[:, 4, :, :, :],  name="Last_TS_ConvLSTM_3")(x_endcoded_3_CLSTM)
-        # Last_TS_ConvLSTM_4 (Lambda)  (None, 8, 8, 256)
-        x_dedcoded_3 = conv2d_trans_layer4(x_endcoded_4_CLSTM)
-        # DeConv4 (Conv2DTranspose)    (None, 16, 16, 128)
-
-        #x_dedcoded_3 = tf.multiply(x_endcoded_3_CLSTM, x_dedcoded_3)
-        #x_dedcoded_3 = tf.keras.layers.Lambda(lambda x: x[:, 4,:,:,:], name="Last_TS_DeConv_4")(
-        #    x_dedcoded_3)
-        #x_endcoded_3_CLSTM = tf.keras.layers.Lambda(lambda x: x[:, 4, :, :, :], name="Last_TS_DeConv_4")(
-        #    x_endcoded_3_CLSTM)
-        # Hinweis: wenn rekonstruktion über alle Zeitschritte also DeConv mit timeDistribute, dann axis=4 bei concat
-        con2 = tf.keras.layers.Concatenate(axis=3, name="Con4")([x_dedcoded_3, x_endcoded_3_CLSTM])
-        #x_dedcoded_2 = tf.keras.layers.TimeDistributed(conv2d_trans_layer3, name="DeConv3")(con2)
-        x_dedcoded_2 = conv2d_trans_layer3(con2)
-
-        con2 = tf.keras.layers.Concatenate(axis=3, name="Con1")([x_dedcoded_2, x_endcoded_2_CLSTM])
-        #x_dedcoded_1 = tf.keras.layers.TimeDistributed(conv2d_trans_layer2, name="DeConv2")(con2)
-        x_dedcoded_1 = conv2d_trans_layer2(con2)
-
-        con2 = tf.keras.layers.Concatenate(axis=3, name="Con0")([x_dedcoded_1, x_endcoded_1_CLSTM])
-
-        #x_dedcoded_0 = tf.keras.layers.TimeDistributed(conv2d_trans_layer1, name="DeConv1")(con2)
-        x_dedcoded_0 = conv2d_trans_layer1(con2)
-
-        #Return only the last time step, when time distribute decoding is active
-        #x_dedcoded_0 = tf.keras.layers.Lambda(lambda x: x[:,4,:,:,:])(x_dedcoded_0)
-
-        model = tf.keras.Model(inputs=signatureMatrixInput, outputs=[x_dedcoded_0, hidden_rep])
-        #model = tf.keras.Model(inputs=signatureMatrixInput, outputs=x_dedcoded_0)
-
-        return model
-
-class MSCRED_with_Memory2_Auto(tf.keras.Model):
-
-    def __init__(self):
-
-        super(MSCRED_with_Memory2_Auto, self).__init__()
-
-
-    def create_model(self):
-        print("create model!")
-
-        signatureMatrixInput = tf.keras.Input(shape=(5, 61, 61, config.dim_of_dataset), batch_size=None, name="Input0")
-
-        conv2d_layer1 = tf.keras.layers.Conv2D(filters=config.filter_dimension_encoder[0], strides=[1, 1], kernel_size=[3, 3],
-                                               padding='same',
-                                               activation='selu')
-        conv2d_layer2 = tf.keras.layers.Conv2D(filters=config.filter_dimension_encoder[1], strides=[2, 2], kernel_size=[3, 3],
-                                               padding='same',
-                                               activation='selu')
-        conv2d_layer3 = tf.keras.layers.Conv2D(filters=config.filter_dimension_encoder[2], strides=[2, 2], kernel_size=[2, 2],
-                                               padding='same',
-                                               activation='selu')
-        conv2d_layer4 = tf.keras.layers.Conv2D(filters=config.filter_dimension_encoder[3], strides=[2, 2], kernel_size=[2, 2],
-                                               padding='same',
-                                               activation='selu')
-        convLISTM_layer1 = tf.keras.layers.ConvLSTM2D(filters=config.filter_dimension_encoder[0], strides=1, kernel_size=[2, 2], padding='same',
-                                                      return_sequences=True, name="ConvLSTM1")
-        convLISTM_layer2 = tf.keras.layers.ConvLSTM2D(filters=config.filter_dimension_encoder[1], strides=1, kernel_size=[2, 2], padding='same',
-                                                      return_sequences=True, name="ConvLSTM2")
-
-        convLISTM_layer3 = tf.keras.layers.ConvLSTM2D(filters=config.filter_dimension_encoder[2], strides=1, kernel_size=[2, 2], padding='same',
-                                                      return_sequences=True, name="ConvLSTM3")
-
-        convLISTM_layer4 = tf.keras.layers.ConvLSTM2D(filters=config.filter_dimension_encoder[3], strides=1, kernel_size=[2, 2], padding='same',
-                                                      return_sequences=True, name="ConvLSTM4")
-
-        conv2d_trans_layer4 = tf.keras.layers.Conv2DTranspose(filters=config.filter_dimension_encoder[2], strides=[2, 2],
-                                                              kernel_size=[2, 2], padding='same',
-                                                              activation='selu', name="DeConv4")
-        conv2d_trans_layer3 = tf.keras.layers.Conv2DTranspose(filters=config.filter_dimension_encoder[1], strides=[2, 2],
-                                                              kernel_size=[2, 2], padding='same',
-                                                              activation='selu', output_padding=1)
-        conv2d_trans_layer2 = tf.keras.layers.Conv2DTranspose(filters=config.filter_dimension_encoder[0], strides=[2, 2],
-                                                              kernel_size=[3, 3], padding='same',
-                                                              activation='selu', output_padding=0)
-        conv2d_trans_layer1 = tf.keras.layers.Conv2DTranspose(filters=config.dim_of_dataset, strides=[1, 1],
-                                                              kernel_size=[3, 3], padding='same',
-                                                              activation='selu')
-
-        x_endcoded_1 = tf.keras.layers.TimeDistributed(conv2d_layer1, name="Conv1")(signatureMatrixInput)
-        x_endcoded_2 = tf.keras.layers.TimeDistributed(conv2d_layer2, name="Conv2")(x_endcoded_1)
-        x_endcoded_3 = tf.keras.layers.TimeDistributed(conv2d_layer3, name="Conv3")(x_endcoded_2)
-        x_endcoded_4 = tf.keras.layers.TimeDistributed(conv2d_layer4, name="Conv4")(x_endcoded_3)
-
-        x_endcoded_1_CLSTM = convLISTM_layer1(x_endcoded_1)
-        x_endcoded_2_CLSTM = convLISTM_layer2(x_endcoded_2)
-        x_endcoded_3_CLSTM = convLISTM_layer3(x_endcoded_3)
-        x_endcoded_4_CLSTM = convLISTM_layer4(x_endcoded_4)
-
-        ### Memory ###
-        '''
-        memory = Memory()
-        x_endcoded_4_CLSTM_hidden = tf.keras.layers.Lambda(lambda x: x[:, 4, :, :, :], name="Getting_Conv4_HiddenRep")(x_endcoded_4_CLSTM)
-        hidden_rep = tf.keras.layers.Reshape(( 8 * 8 * 256,), name="Flatten_Conv4_HiddenRep")(x_endcoded_4_CLSTM_hidden)
-        x_endcoded_4_CLSTM_flatten = memory(hidden_rep)
-        x_endcoded_4_CLSTM = tf.keras.layers.Reshape(( 8, 8, 256),name="Reshape_ToOrignal_ConvLSTM_4")(x_endcoded_4_CLSTM_flatten)
-        '''
-
-        ### Attention ###
-        ## Attention for x_endcoded_4_CLSTM
-
-        # Flatten to vector
-        x_endcoded_4_CLSTM_flatten = tf.keras.layers.Reshape((config.step_max,8*8*config.filter_dimension_encoder[3]), name="Flatten_ConvLSTM_4")(x_endcoded_4_CLSTM)
-        # x_endcoded_1_CLSTM_flatten: [?,5,16384]
-        x_endcoded_4_CLSTM_last_time_step = tf.keras.layers.Lambda(lambda x: x[:,config.step_max-1,:], name="Last_TS_ConvLSTM_4")(x_endcoded_4_CLSTM_flatten)
-        x_endcoded_4_CLSTM_last_time_step_5 = tf.keras.layers.RepeatVector(config.step_max, name="Repeated_Last_TS_ConvLSTM_4")(x_endcoded_4_CLSTM_last_time_step)
-        #x_endcoded_4_CLSTM_scores = tf.matmul(x_endcoded_4_CLSTM_flatten, x_endcoded_4_CLSTM_last_time_step, transpose_b=True, name="Scores_ConvLSTM_4")
-        x_endcoded_4_CLSTM_scores = tf.reduce_sum(tf.reduce_sum(tf.multiply(x_endcoded_4_CLSTM_flatten, x_endcoded_4_CLSTM_last_time_step_5) ,axis=2, keepdims=True),axis=2)
-        #x_endcoded_4_CLSTM_scores = tf.squeeze(x_endcoded_4_CLSTM_scores, name="Squeeze_Scores_ConvLSTM_4")
-        x_endcoded_4_CLSTM_attention = tf.nn.softmax(x_endcoded_4_CLSTM_scores, name="Attention_ConvLSTM_4")
-        x_endcoded_4_CLSTM_attention_repeated = tf.keras.layers.RepeatVector(8*8*config.filter_dimension_encoder[3], name="Repeated_Attention_ConvLSTM_4")(x_endcoded_4_CLSTM_attention)
-        x_endcoded_4_CLSTM_attention_repeated_T = tf.keras.backend.permute_dimensions(x_endcoded_4_CLSTM_attention_repeated, pattern=(0,2, 1))
-        x_endcoded_4_CLSTM_flatten = tf.multiply(x_endcoded_4_CLSTM_attention_repeated_T, x_endcoded_4_CLSTM_flatten, name="Apply_Att_ConvLSTM_4")
-        x_endcoded_4_CLSTM_flatten = tf.reduce_sum(x_endcoded_4_CLSTM_flatten, axis= 1, name="Apply_Att_ConvLSTM_4")
-        x_endcoded_4_CLSTM = tf.keras.layers.Reshape(( 8, 8, config.filter_dimension_encoder[3]),name="Reshape_ToOrignal_ConvLSTM_4")(x_endcoded_4_CLSTM_flatten)
-
-        ## Attention for x_endcoded_3_CLSTM
-        # Flatten to vector
-        x_endcoded_3_CLSTM_flatten = tf.keras.layers.Reshape((config.step_max,16*16*config.filter_dimension_encoder[2]), name="Flatten_ConvLSTM_3")(x_endcoded_3_CLSTM)
-        # x_endcoded_1_CLSTM_flatten: [?,5,16384]
-        x_endcoded_3_CLSTM_last_time_step = tf.keras.layers.Lambda(lambda x: x[:,config.step_max-1,:], name="Last_TS_ConvLSTM_3")(x_endcoded_3_CLSTM_flatten)
-        x_endcoded_3_CLSTM_last_time_step_5 = tf.keras.layers.RepeatVector(config.step_max, name="Repeated_Last_TS_ConvLSTM_3")(
-            x_endcoded_3_CLSTM_last_time_step)
-        x_endcoded_3_CLSTM_scores = tf.reduce_sum(
-            tf.reduce_sum(tf.multiply(x_endcoded_3_CLSTM_flatten, x_endcoded_3_CLSTM_last_time_step_5), axis=2,
-                          keepdims=True), axis=2)
-        x_endcoded_3_CLSTM_attention = tf.nn.softmax(x_endcoded_3_CLSTM_scores, name="Attention_ConvLSTM_3")
-        x_endcoded_3_CLSTM_attention_repeated = tf.keras.layers.RepeatVector(16 * 16 * config.filter_dimension_encoder[2], name="Repeated_Attention_ConvLSTM_3")(x_endcoded_3_CLSTM_attention)
-        x_endcoded_3_CLSTM_attention_repeated_T = tf.keras.backend.permute_dimensions(x_endcoded_3_CLSTM_attention_repeated, pattern=(0, 2, 1))
-        x_endcoded_3_CLSTM_flatten = tf.multiply(x_endcoded_3_CLSTM_attention_repeated_T, x_endcoded_3_CLSTM_flatten,name="Apply_Att_ConvLSTM_3")
-        x_endcoded_3_CLSTM_flatten = tf.reduce_sum(x_endcoded_3_CLSTM_flatten, axis=1, name="Apply_Att_ConvLSTM_3")
-        x_endcoded_3_CLSTM = tf.keras.layers.Reshape((16, 16, config.filter_dimension_encoder[2]),name="Reshape_ToOrignal_ConvLSTM_3")(x_endcoded_3_CLSTM_flatten)
-
-        ## Attention for x_endcoded_2_CLSTM
-        # Flatten to vector
-        x_endcoded_2_CLSTM_flatten = tf.keras.layers.Reshape((config.step_max,31*31*config.filter_dimension_encoder[1]), name="Flatten_ConvLSTM_2")(x_endcoded_2_CLSTM)
-        # x_endcoded_1_CLSTM_flatten: [?,5,16384]
-        x_endcoded_2_CLSTM_last_time_step = tf.keras.layers.Lambda(lambda x: x[:,config.step_max-1,:], name="Last_TS_ConvLSTM_2")(x_endcoded_2_CLSTM_flatten)
-        x_endcoded_2_CLSTM_last_time_step_5 = tf.keras.layers.RepeatVector(5, name="Repeated_Last_TS_ConvLSTM_2")(x_endcoded_2_CLSTM_last_time_step)
-        x_endcoded_2_CLSTM_scores = tf.reduce_sum(tf.reduce_sum(tf.multiply(x_endcoded_2_CLSTM_flatten, x_endcoded_2_CLSTM_last_time_step_5), axis=2,
-                          keepdims=True), axis=2)
-        x_endcoded_2_CLSTM_attention = tf.nn.softmax(x_endcoded_2_CLSTM_scores, name="Attention_ConvLSTM_2")
-        x_endcoded_2_CLSTM_attention_repeated = tf.keras.layers.RepeatVector(31 * 31 * config.filter_dimension_encoder[1], name="Repeated_Attention_ConvLSTM_2")(x_endcoded_2_CLSTM_attention)
-        x_endcoded_2_CLSTM_attention_repeated_T = tf.keras.backend.permute_dimensions(x_endcoded_2_CLSTM_attention_repeated, pattern=(0, 2, 1))
-        x_endcoded_2_CLSTM_flatten = tf.multiply(x_endcoded_2_CLSTM_attention_repeated_T, x_endcoded_2_CLSTM_flatten,name="Apply_Att_ConvLSTM_2")
-        x_endcoded_2_CLSTM_flatten = tf.reduce_sum(x_endcoded_2_CLSTM_flatten, axis=1, name="Apply_Att_ConvLSTM_2")
-        x_endcoded_2_CLSTM = tf.keras.layers.Reshape((31, 31, config.filter_dimension_encoder[1]),name="Reshape_ToOrignal_ConvLSTM_2")(x_endcoded_2_CLSTM_flatten)
-
-        ## Attention for x_endcoded_1_CLSTM
-        # Flatten to vector
-        x_endcoded_1_CLSTM_flatten = tf.keras.layers.Reshape((config.step_max,61*61*config.filter_dimension_encoder[0]), name="Flatten_ConvLSTM_1")(x_endcoded_1_CLSTM)
-        # x_endcoded_1_CLSTM_flatten: [?,5,16384]
-        x_endcoded_1_CLSTM_last_time_step = tf.keras.layers.Lambda(lambda x: x[:,config.step_max-1,:], name="Last_TS_ConvLSTM_1")(x_endcoded_1_CLSTM_flatten)
-        x_endcoded_1_CLSTM_last_time_step_5 = tf.keras.layers.RepeatVector(config.step_max, name="Repeated_Last_TS_ConvLSTM_1")(x_endcoded_1_CLSTM_last_time_step)
-        x_endcoded_1_CLSTM_scores = tf.reduce_sum(tf.reduce_sum(tf.multiply(x_endcoded_1_CLSTM_flatten, x_endcoded_1_CLSTM_last_time_step_5), axis=2,
-                          keepdims=True), axis=2)
-        x_endcoded_1_CLSTM_attention = tf.nn.softmax(x_endcoded_1_CLSTM_scores, name="Attention_ConvLSTM_1")
-        x_endcoded_1_CLSTM_attention_repeated = tf.keras.layers.RepeatVector(61 * 61 * config.filter_dimension_encoder[0], name="Repeated_Attention_ConvLSTM_1")(x_endcoded_1_CLSTM_attention)
-        x_endcoded_1_CLSTM_attention_repeated_T = tf.keras.backend.permute_dimensions(x_endcoded_1_CLSTM_attention_repeated, pattern=(0, 2, 1))
-        x_endcoded_1_CLSTM_flatten = tf.multiply(x_endcoded_1_CLSTM_attention_repeated_T, x_endcoded_1_CLSTM_flatten,name="Apply_Att_ConvLSTM_1")
-        x_endcoded_1_CLSTM_flatten = tf.reduce_sum(x_endcoded_1_CLSTM_flatten, axis=1, name="Apply_Att_ConvLSTM_1")
-        x_endcoded_1_CLSTM = tf.keras.layers.Reshape((61, 61, config.filter_dimension_encoder[0]),name="Reshape_ToOrignal_ConvLSTM_1")(x_endcoded_1_CLSTM_flatten)
-
-        ### Memory ###
-        memory4 = Memory(100, 8 * 8 * config.filter_dimension_encoder[3])
-        memory3 = Memory(100, 16 * 16 * config.filter_dimension_encoder[2])
-        memory2 = Memory(100, 31 * 31 * config.filter_dimension_encoder[1])
-        memory1 = Memory(100, 61 * 61 * config.filter_dimension_encoder[0])
-
-        hidden_rep4 = tf.keras.layers.Reshape((8 * 8 * config.filter_dimension_encoder[3],), name="Flatten_Conv4_HiddenRep")(x_endcoded_4_CLSTM)
-        x_endcoded_4_CLSTM_flatten, w4 = memory4(hidden_rep4)
-        x_endcoded_4_CLSTM = tf.keras.layers.Reshape((8, 8, config.filter_dimension_encoder[3]),name="Reshape_ToOrignal_ConvLSTM_4_Mem")(x_endcoded_4_CLSTM_flatten)
-
-        hidden_rep3 = tf.keras.layers.Reshape((16 * 16 * config.filter_dimension_encoder[2],), name="Flatten_Conv3_HiddenRep")(x_endcoded_3_CLSTM)
-        x_endcoded_3_CLSTM_flatten, w3 = memory3(hidden_rep3)
-        x_endcoded_3_CLSTM = tf.keras.layers.Reshape((16, 16, config.filter_dimension_encoder[2]),name="Reshape_ToOrignal_ConvLSTM_3_Mem")(x_endcoded_3_CLSTM_flatten)
-
-        hidden_rep2 = tf.keras.layers.Reshape((31 * 31 * config.filter_dimension_encoder[1],), name="Flatten_Conv2_HiddenRep")(x_endcoded_2_CLSTM)
-        x_endcoded_2_CLSTM_flatten, w2 = memory2(hidden_rep2)
-        x_endcoded_2_CLSTM = tf.keras.layers.Reshape((31, 31, config.filter_dimension_encoder[1]),name="Reshape_ToOrignal_ConvLSTM_2_Mem")(x_endcoded_2_CLSTM_flatten)
-
-        hidden_rep1 = tf.keras.layers.Reshape((61 * 61 * config.filter_dimension_encoder[0],), name="Flatten_Conv1_HiddenRep")(x_endcoded_1_CLSTM)
-        x_endcoded_1_CLSTM_flatten, w1 = memory1(hidden_rep1)
-        x_endcoded_1_CLSTM = tf.keras.layers.Reshape((61, 61, config.filter_dimension_encoder[0]),name="Reshape_ToOrignal_ConvLSTM_1_Mem")(x_endcoded_1_CLSTM_flatten)
-
-
-        #x_dedcoded_3 = tf.keras.layers.TimeDistributed(conv2d_trans_layer4, name="DeConv4")(x_endcoded_4_CLSTM)
-
-        #x_endcoded_4_CLSTM = tf.keras.layers.Lambda(lambda x: x[:, 4, :, :, :], name="Last_TS_ConvLSTM_4")(x_endcoded_4_CLSTM)
-        #x_endcoded_3_CLSTM = tf.keras.layers.Lambda(lambda x: x[:, 4, :, :, :],  name="Last_TS_ConvLSTM_3")(x_endcoded_3_CLSTM)
-        # Last_TS_ConvLSTM_4 (Lambda)  (None, 8, 8, 256)
-        x_dedcoded_3 = conv2d_trans_layer4(x_endcoded_4_CLSTM)
-        # DeConv4 (Conv2DTranspose)    (None, 16, 16, 128)
-
-        #x_dedcoded_3 = tf.multiply(x_endcoded_3_CLSTM, x_dedcoded_3)
-        #x_dedcoded_3 = tf.keras.layers.Lambda(lambda x: x[:, 4,:,:,:], name="Last_TS_DeConv_4")(
-        #    x_dedcoded_3)
-        #x_endcoded_3_CLSTM = tf.keras.layers.Lambda(lambda x: x[:, 4, :, :, :], name="Last_TS_DeConv_4")(
-        #    x_endcoded_3_CLSTM)
-        # Hinweis: wenn rekonstruktion über alle Zeitschritte also DeConv mit timeDistribute, dann axis=4 bei concat
-        con2 = tf.keras.layers.Concatenate(axis=3, name="Con4")([x_dedcoded_3, x_endcoded_3_CLSTM])
-        #x_dedcoded_2 = tf.keras.layers.TimeDistributed(conv2d_trans_layer3, name="DeConv3")(con2)
-        x_dedcoded_2 = conv2d_trans_layer3(con2)
-
-        con2 = tf.keras.layers.Concatenate(axis=3, name="Con1")([x_dedcoded_2, x_endcoded_2_CLSTM])
-        #x_dedcoded_1 = tf.keras.layers.TimeDistributed(conv2d_trans_layer2, name="DeConv2")(con2)
-        x_dedcoded_1 = conv2d_trans_layer2(con2)
-
-        con2 = tf.keras.layers.Concatenate(axis=3, name="Con0")([x_dedcoded_1, x_endcoded_1_CLSTM])
-
-        #x_dedcoded_0 = tf.keras.layers.TimeDistributed(conv2d_trans_layer1, name="DeConv1")(con2)
-        x_dedcoded_0 = conv2d_trans_layer1(con2)
-
-        #Return only the last time step, when time distribute decoding is active
-        #x_dedcoded_0 = tf.keras.layers.Lambda(lambda x: x[:,4,:,:,:])(x_dedcoded_0)
-
-        #model = tf.keras.Model(inputs=signatureMatrixInput, outputs=[x_dedcoded_0, hidden_rep])
-
-        #for memory weight shrinkage:
-        w_hat_t = tf.keras.layers.Concatenate()([w1, w2, w3, w4])
-
-        model = tf.keras.Model(inputs=signatureMatrixInput, outputs=[x_dedcoded_0,w_hat_t])
-
-        return model
-
-# For test purposes
-''' 
-class MSCRED_with_Memory2_Auto_InstanceBased(tf.keras.Model):
-
-    def __init__(self):
-
-        super(MSCRED_with_Memory2_Auto_InstanceBased, self).__init__()
-
-
-    def create_model(self):
-        print("create model!")
-
-        signatureMatrixInput = tf.keras.Input(shape=(5, 61, 61, config.dim_of_dataset), batch_size=None, name="Input0")
-
-        conv2d_layer1 = tf.keras.layers.Conv2D(filters=config.filter_dimension_encoder[0], strides=[1, 1], kernel_size=[3, 3],
-                                               padding='same',
-                                               activation='selu')
-        conv2d_layer2 = tf.keras.layers.Conv2D(filters=config.filter_dimension_encoder[1], strides=[2, 2], kernel_size=[3, 3],
-                                               padding='same',
-                                               activation='selu')
-        conv2d_layer3 = tf.keras.layers.Conv2D(filters=config.filter_dimension_encoder[2], strides=[2, 2], kernel_size=[2, 2],
-                                               padding='same',
-                                               activation='selu')
-        conv2d_layer4 = tf.keras.layers.Conv2D(filters=config.filter_dimension_encoder[3], strides=[2, 2], kernel_size=[2, 2],
-                                               padding='same',
-                                               activation='selu')
-        convLISTM_layer1 = tf.keras.layers.ConvLSTM2D(filters=config.filter_dimension_encoder[0], strides=1, kernel_size=[2, 2], padding='same',
-                                                      return_sequences=True, name="ConvLSTM1")
-        convLISTM_layer2 = tf.keras.layers.ConvLSTM2D(filters=config.filter_dimension_encoder[1], strides=1, kernel_size=[2, 2], padding='same',
-                                                      return_sequences=True, name="ConvLSTM2")
-
-        convLISTM_layer3 = tf.keras.layers.ConvLSTM2D(filters=config.filter_dimension_encoder[2], strides=1, kernel_size=[2, 2], padding='same',
-                                                      return_sequences=True, name="ConvLSTM3")
-
-        convLISTM_layer4 = tf.keras.layers.ConvLSTM2D(filters=config.filter_dimension_encoder[3], strides=1, kernel_size=[2, 2], padding='same',
-                                                      return_sequences=True, name="ConvLSTM4")
-
-        conv2d_trans_layer4 = tf.keras.layers.Conv2DTranspose(filters=config.filter_dimension_encoder[2], strides=[2, 2],
-                                                              kernel_size=[2, 2], padding='same',
-                                                              activation='selu', name="DeConv4")
-        conv2d_trans_layer3 = tf.keras.layers.Conv2DTranspose(filters=config.filter_dimension_encoder[1], strides=[2, 2],
-                                                              kernel_size=[2, 2], padding='same',
-                                                              activation='selu', output_padding=1)
-        conv2d_trans_layer2 = tf.keras.layers.Conv2DTranspose(filters=config.filter_dimension_encoder[0], strides=[2, 2],
-                                                              kernel_size=[3, 3], padding='same',
-                                                              activation='selu', output_padding=0)
-        conv2d_trans_layer1 = tf.keras.layers.Conv2DTranspose(filters=config.dim_of_dataset, strides=[1, 1],
-                                                              kernel_size=[3, 3], padding='same',
-                                                              activation='selu')
-
-        x_endcoded_1 = tf.keras.layers.TimeDistributed(conv2d_layer1, name="Conv1")(signatureMatrixInput)
-        x_endcoded_2 = tf.keras.layers.TimeDistributed(conv2d_layer2, name="Conv2")(x_endcoded_1)
-        x_endcoded_3 = tf.keras.layers.TimeDistributed(conv2d_layer3, name="Conv3")(x_endcoded_2)
-        x_endcoded_4 = tf.keras.layers.TimeDistributed(conv2d_layer4, name="Conv4")(x_endcoded_3)
-
-        x_endcoded_1_CLSTM = convLISTM_layer1(x_endcoded_1)
-        x_endcoded_2_CLSTM = convLISTM_layer2(x_endcoded_2)
-        x_endcoded_3_CLSTM = convLISTM_layer3(x_endcoded_3)
-        x_endcoded_4_CLSTM = convLISTM_layer4(x_endcoded_4)
-
-
-        ### Attention ###
-        ## Attention for x_endcoded_4_CLSTM
-
-        # Flatten to vector
-        x_endcoded_4_CLSTM_flatten = tf.keras.layers.Reshape((5,8*8*256), name="Flatten_ConvLSTM_4")(x_endcoded_4_CLSTM)
-        # x_endcoded_1_CLSTM_flatten: [?,5,16384]
-        x_endcoded_4_CLSTM_last_time_step = tf.keras.layers.Lambda(lambda x: x[:,4,:], name="Last_TS_ConvLSTM_4")(x_endcoded_4_CLSTM_flatten)
-        x_endcoded_4_CLSTM_last_time_step_5 = tf.keras.layers.RepeatVector(5, name="Repeated_Last_TS_ConvLSTM_4")(x_endcoded_4_CLSTM_last_time_step)
-        #x_endcoded_4_CLSTM_scores = tf.matmul(x_endcoded_4_CLSTM_flatten, x_endcoded_4_CLSTM_last_time_step, transpose_b=True, name="Scores_ConvLSTM_4")
-        x_endcoded_4_CLSTM_scores = tf.reduce_sum(tf.reduce_sum(tf.multiply(x_endcoded_4_CLSTM_flatten, x_endcoded_4_CLSTM_last_time_step_5) ,axis=2, keepdims=True),axis=2)
-        #x_endcoded_4_CLSTM_scores = tf.squeeze(x_endcoded_4_CLSTM_scores, name="Squeeze_Scores_ConvLSTM_4")
-        x_endcoded_4_CLSTM_attention = tf.nn.softmax(x_endcoded_4_CLSTM_scores, name="Attention_ConvLSTM_4")
-        x_endcoded_4_CLSTM_attention_repeated = tf.keras.layers.RepeatVector(8*8*256, name="Repeated_Attention_ConvLSTM_4")(x_endcoded_4_CLSTM_attention)
-        x_endcoded_4_CLSTM_attention_repeated_T = tf.keras.backend.permute_dimensions(x_endcoded_4_CLSTM_attention_repeated, pattern=(0,2, 1))
-        x_endcoded_4_CLSTM_flatten = tf.multiply(x_endcoded_4_CLSTM_attention_repeated_T, x_endcoded_4_CLSTM_flatten, name="Apply_Att_ConvLSTM_4")
-        x_endcoded_4_CLSTM_flatten = tf.reduce_sum(x_endcoded_4_CLSTM_flatten, axis= 1, name="Apply_Att_ConvLSTM_4")
-        x_endcoded_4_CLSTM = tf.keras.layers.Reshape(( 8, 8, 256),name="Reshape_ToOrignal_ConvLSTM_4")(x_endcoded_4_CLSTM_flatten)
-
-        ## Attention for x_endcoded_3_CLSTM
-        # Flatten to vector
-        x_endcoded_3_CLSTM_flatten = tf.keras.layers.Reshape((5,16*16*128), name="Flatten_ConvLSTM_3")(x_endcoded_3_CLSTM)
-        # x_endcoded_1_CLSTM_flatten: [?,5,16384]
-        x_endcoded_3_CLSTM_last_time_step = tf.keras.layers.Lambda(lambda x: x[:,4,:], name="Last_TS_ConvLSTM_3")(x_endcoded_3_CLSTM_flatten)
-        x_endcoded_3_CLSTM_last_time_step_5 = tf.keras.layers.RepeatVector(5, name="Repeated_Last_TS_ConvLSTM_3")(
-            x_endcoded_3_CLSTM_last_time_step)
-        x_endcoded_3_CLSTM_scores = tf.reduce_sum(
-            tf.reduce_sum(tf.multiply(x_endcoded_3_CLSTM_flatten, x_endcoded_3_CLSTM_last_time_step_5), axis=2,
-                          keepdims=True), axis=2)
-        x_endcoded_3_CLSTM_attention = tf.nn.softmax(x_endcoded_3_CLSTM_scores, name="Attention_ConvLSTM_3")
-        x_endcoded_3_CLSTM_attention_repeated = tf.keras.layers.RepeatVector(16 * 16 * 128, name="Repeated_Attention_ConvLSTM_3")(x_endcoded_3_CLSTM_attention)
-        x_endcoded_3_CLSTM_attention_repeated_T = tf.keras.backend.permute_dimensions(x_endcoded_3_CLSTM_attention_repeated, pattern=(0, 2, 1))
-        x_endcoded_3_CLSTM_flatten = tf.multiply(x_endcoded_3_CLSTM_attention_repeated_T, x_endcoded_3_CLSTM_flatten,name="Apply_Att_ConvLSTM_3")
-        x_endcoded_3_CLSTM_flatten = tf.reduce_sum(x_endcoded_3_CLSTM_flatten, axis=1, name="Apply_Att_ConvLSTM_3")
-        x_endcoded_3_CLSTM = tf.keras.layers.Reshape((16, 16, 128),name="Reshape_ToOrignal_ConvLSTM_3")(x_endcoded_3_CLSTM_flatten)
-
-        ## Attention for x_endcoded_2_CLSTM
-        # Flatten to vector
-        x_endcoded_2_CLSTM_flatten = tf.keras.layers.Reshape((5,31*31*64), name="Flatten_ConvLSTM_2")(x_endcoded_2_CLSTM)
-        # x_endcoded_1_CLSTM_flatten: [?,5,16384]
-        x_endcoded_2_CLSTM_last_time_step = tf.keras.layers.Lambda(lambda x: x[:,4,:], name="Last_TS_ConvLSTM_2")(x_endcoded_2_CLSTM_flatten)
-        x_endcoded_2_CLSTM_last_time_step_5 = tf.keras.layers.RepeatVector(5, name="Repeated_Last_TS_ConvLSTM_2")(x_endcoded_2_CLSTM_last_time_step)
-        x_endcoded_2_CLSTM_scores = tf.reduce_sum(tf.reduce_sum(tf.multiply(x_endcoded_2_CLSTM_flatten, x_endcoded_2_CLSTM_last_time_step_5), axis=2,
-                          keepdims=True), axis=2)
-        x_endcoded_2_CLSTM_attention = tf.nn.softmax(x_endcoded_2_CLSTM_scores, name="Attention_ConvLSTM_2")
-        x_endcoded_2_CLSTM_attention_repeated = tf.keras.layers.RepeatVector(31 * 31 * 64, name="Repeated_Attention_ConvLSTM_2")(x_endcoded_2_CLSTM_attention)
-        x_endcoded_2_CLSTM_attention_repeated_T = tf.keras.backend.permute_dimensions(x_endcoded_2_CLSTM_attention_repeated, pattern=(0, 2, 1))
-        x_endcoded_2_CLSTM_flatten = tf.multiply(x_endcoded_2_CLSTM_attention_repeated_T, x_endcoded_2_CLSTM_flatten,name="Apply_Att_ConvLSTM_2")
-        x_endcoded_2_CLSTM_flatten = tf.reduce_sum(x_endcoded_2_CLSTM_flatten, axis=1, name="Apply_Att_ConvLSTM_2")
-        x_endcoded_2_CLSTM = tf.keras.layers.Reshape((31, 31, 64),name="Reshape_ToOrignal_ConvLSTM_2")(x_endcoded_2_CLSTM_flatten)
-
-        ## Attention for x_endcoded_1_CLSTM
-        # Flatten to vector
-        x_endcoded_1_CLSTM_flatten = tf.keras.layers.Reshape((5,61*61*32), name="Flatten_ConvLSTM_1")(x_endcoded_1_CLSTM)
-        # x_endcoded_1_CLSTM_flatten: [?,5,16384]
-        x_endcoded_1_CLSTM_last_time_step = tf.keras.layers.Lambda(lambda x: x[:,4,:], name="Last_TS_ConvLSTM_1")(x_endcoded_1_CLSTM_flatten)
-        x_endcoded_1_CLSTM_last_time_step_5 = tf.keras.layers.RepeatVector(5, name="Repeated_Last_TS_ConvLSTM_1")(x_endcoded_1_CLSTM_last_time_step)
-        x_endcoded_1_CLSTM_scores = tf.reduce_sum(tf.reduce_sum(tf.multiply(x_endcoded_1_CLSTM_flatten, x_endcoded_1_CLSTM_last_time_step_5), axis=2,
-                          keepdims=True), axis=2)
-        x_endcoded_1_CLSTM_attention = tf.nn.softmax(x_endcoded_1_CLSTM_scores, name="Attention_ConvLSTM_1")
-        x_endcoded_1_CLSTM_attention_repeated = tf.keras.layers.RepeatVector(61 * 61 * 32, name="Repeated_Attention_ConvLSTM_1")(x_endcoded_1_CLSTM_attention)
-        x_endcoded_1_CLSTM_attention_repeated_T = tf.keras.backend.permute_dimensions(x_endcoded_1_CLSTM_attention_repeated, pattern=(0, 2, 1))
-        x_endcoded_1_CLSTM_flatten = tf.multiply(x_endcoded_1_CLSTM_attention_repeated_T, x_endcoded_1_CLSTM_flatten,name="Apply_Att_ConvLSTM_1")
-        x_endcoded_1_CLSTM_flatten = tf.reduce_sum(x_endcoded_1_CLSTM_flatten, axis=1, name="Apply_Att_ConvLSTM_1")
-        x_endcoded_1_CLSTM = tf.keras.layers.Reshape((61, 61, 32),name="Reshape_ToOrignal_ConvLSTM_1")(x_endcoded_1_CLSTM_flatten)
-
-        ### Memory ###
-        memory4 = MemoryInstanceBased(100, 8 * 8 * 256)
-        memory3 = MemoryInstanceBased(100, 16 * 16 * 128)
-        memory2 = MemoryInstanceBased(100, 31 * 31 * 64)
-        memory1 = MemoryInstanceBased(100, 61 * 61 * 32)
-
-        hidden_rep4 = tf.keras.layers.Reshape((8 * 8 * 256,), name="Flatten_Conv4_HiddenRep")(x_endcoded_4_CLSTM)
-        x_endcoded_4_CLSTM_flatten = memory4(hidden_rep4)
-        x_endcoded_4_CLSTM = tf.keras.layers.Reshape((8, 8, 256),name="Reshape_ToOrignal_ConvLSTM_4_Mem")(x_endcoded_4_CLSTM_flatten)
-
-        hidden_rep3 = tf.keras.layers.Reshape((16 * 16 * 128,), name="Flatten_Conv3_HiddenRep")(x_endcoded_3_CLSTM)
-        x_endcoded_3_CLSTM_flatten = memory3(hidden_rep3)
-        x_endcoded_3_CLSTM = tf.keras.layers.Reshape((16, 16, 128),name="Reshape_ToOrignal_ConvLSTM_3_Mem")(x_endcoded_3_CLSTM_flatten)
-
-        hidden_rep2 = tf.keras.layers.Reshape((31 * 31 * 64,), name="Flatten_Conv2_HiddenRep")(x_endcoded_2_CLSTM)
-        x_endcoded_2_CLSTM_flatten = memory2(hidden_rep2)
-        x_endcoded_2_CLSTM = tf.keras.layers.Reshape((31, 31, 64),name="Reshape_ToOrignal_ConvLSTM_2_Mem")(x_endcoded_2_CLSTM_flatten)
-
-        hidden_rep1 = tf.keras.layers.Reshape((61 * 61 * 32,), name="Flatten_Conv1_HiddenRep")(x_endcoded_1_CLSTM)
-        x_endcoded_1_CLSTM_flatten = memory1(hidden_rep1)
-        x_endcoded_1_CLSTM = tf.keras.layers.Reshape((61, 61, 32),name="Reshape_ToOrignal_ConvLSTM_1_Mem")(x_endcoded_1_CLSTM_flatten)
-
-
-        #x_dedcoded_3 = tf.keras.layers.TimeDistributed(conv2d_trans_layer4, name="DeConv4")(x_endcoded_4_CLSTM)
-
-        #x_endcoded_4_CLSTM = tf.keras.layers.Lambda(lambda x: x[:, 4, :, :, :], name="Last_TS_ConvLSTM_4")(x_endcoded_4_CLSTM)
-        #x_endcoded_3_CLSTM = tf.keras.layers.Lambda(lambda x: x[:, 4, :, :, :],  name="Last_TS_ConvLSTM_3")(x_endcoded_3_CLSTM)
-        # Last_TS_ConvLSTM_4 (Lambda)  (None, 8, 8, 256)
-        x_dedcoded_3 = conv2d_trans_layer4(x_endcoded_4_CLSTM)
-        # DeConv4 (Conv2DTranspose)    (None, 16, 16, 128)
-
-        #x_dedcoded_3 = tf.multiply(x_endcoded_3_CLSTM, x_dedcoded_3)
-        #x_dedcoded_3 = tf.keras.layers.Lambda(lambda x: x[:, 4,:,:,:], name="Last_TS_DeConv_4")(
-        #    x_dedcoded_3)
-        #x_endcoded_3_CLSTM = tf.keras.layers.Lambda(lambda x: x[:, 4, :, :, :], name="Last_TS_DeConv_4")(
-        #    x_endcoded_3_CLSTM)
-        # Hinweis: wenn rekonstruktion über alle Zeitschritte also DeConv mit timeDistribute, dann axis=4 bei concat
-        con2 = tf.keras.layers.Concatenate(axis=3, name="Con4")([x_dedcoded_3, x_endcoded_3_CLSTM])
-        #x_dedcoded_2 = tf.keras.layers.TimeDistributed(conv2d_trans_layer3, name="DeConv3")(con2)
-        x_dedcoded_2 = conv2d_trans_layer3(con2)
-
-        con2 = tf.keras.layers.Concatenate(axis=3, name="Con1")([x_dedcoded_2, x_endcoded_2_CLSTM])
-        #x_dedcoded_1 = tf.keras.layers.TimeDistributed(conv2d_trans_layer2, name="DeConv2")(con2)
-        x_dedcoded_1 = conv2d_trans_layer2(con2)
-
-        con2 = tf.keras.layers.Concatenate(axis=3, name="Con0")([x_dedcoded_1, x_endcoded_1_CLSTM])
-
-        #x_dedcoded_0 = tf.keras.layers.TimeDistributed(conv2d_trans_layer1, name="DeConv1")(con2)
-        x_dedcoded_0 = conv2d_trans_layer1(con2)
-
-        #Return only the last time step, when time distribute decoding is active
-        #x_dedcoded_0 = tf.keras.layers.Lambda(lambda x: x[:,4,:,:,:])(x_dedcoded_0)
-
-        #model = tf.keras.Model(inputs=signatureMatrixInput, outputs=[x_dedcoded_0, hidden_rep])
-
-        #for memory weight shrinkage:
-
-        model = tf.keras.Model(inputs=signatureMatrixInput, outputs=x_dedcoded_0)
-
-        return model        
-'''
-
-# This layer should act as a memory
+# This layer should act as a memory that restricts reconstruction: https://openaccess.thecvf.com/content_ICCV_2019/papers/Gong_Memorizing_Normality_to_Detect_Anomaly_Memory-Augmented_Deep_Autoencoder_for_Unsupervised_ICCV_2019_paper.pdf
 #Source: https://github.com/YeongHyeon/MemAE-TF2/blob/78f374d2a63089713717276359c4896508bb4aeb/source/neuralnet.py
 class Memory(tf.keras.layers.Layer):
     def __init__(self, memory_size, input_size, **kwargs):

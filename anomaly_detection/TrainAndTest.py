@@ -6,9 +6,6 @@ import sklearn.model_selection as model_selection
 import matplotlib.pyplot as plt
 import numpy as np
 from MscredModel import MSCRED
-from MscredModel import MSCRED_with_LatentOutput
-from MscredModel import MSCRED_with_Memory2_Auto
-#from mscred import MSCRED_with_Memory2_Auto_InstanceBased
 from MscredModel import Memory
 #from mscred import MemoryInstanceBased
 from configuration.Configuration import Configuration
@@ -279,76 +276,45 @@ def mscred_loss_acc_paper(y_true, y_pred):
     print("loss dim: ", loss.shape)
     return tf.reduce_mean(loss, axis=-1)  # Note the `axis=-1`
 
-def my_loss_fn2_0(y_true, y_pred):
-    # MSCRED Implementation
-    print("y_pred dim_0: ", y_pred.shape)
+def MseLoss(y_true, y_pred):
     loss = tf.square(y_true - y_pred)
     #loss = np.square(np.linalg.norm((y_true - y_pred[0]), ord='fro'))
-    print("loss dim: ", loss.shape)
+    #K.mean(math_ops.squared_difference(y_pred, y_true), axis=-1)
     loss = tf.reduce_mean(loss, axis=-1)
-    print("my_loss_fn2_0 loss dim: ", loss.shape)
     return loss  # Note the `axis=-1`
-def my_loss_fn2_1(y_true, y_pred):
-    # MSCRED Implementation
-    #loss = tf.square(y_true - y_pred)
-    #loss = np.square(np.linalg.norm((y_true - y_pred[0]), ord='fro'))
-    print("y_pred dim_1: ", y_pred.shape)
-    print("y_true dim_1: ", y_true.shape)
+
+def SimLoss(y_true, y_pred):
+    ### For doing something like this: https://www.sciencedirect.com/science/article/abs/pii/S1361841519301562
     y_pred = tf.squeeze(y_pred)
-    print("y_pred dim_1: ", y_pred.shape)
     #cosine_loss = tf.keras.losses.CosineSimilarity(axis=1)
 
-    #loss = cosine_loss(y_true, y_pred)
-    '''
-        indices_a = tf.range(config.batch_size)
-        indices_a = tf.tile(indices_a, [config.batch_size])
-        y_pred = tf.gather(y_pred, indices_a)
-        # a shape: [T*T, C]
-        print("y_pred dim_tiled: ", y_pred.shape)
-        indices_b = tf.range(config.batch_size)
-        indices_b = tf.reshape(indices_b, [-1, 1])
-        indices_b = tf.tile(indices_b, [1, config.batch_size])
-        indices_b = tf.reshape(indices_b, [-1])
-        y_true = tf.gather(y_true, indices_b)
-        loss = cosine_loss(y_true, y_pred)
-     '''
     #Cosine Sim:#
     x = tf.nn.l2_normalize(y_pred, axis=0)
     y = tf.nn.l2_normalize(y_pred, axis=0)
     loss = tf.matmul(x, y, transpose_b=True)
-    print("x loss dim: ", loss.shape)
+    #print("x loss dim: ", loss.shape)
     loss = tf.math.abs(loss)
 
     # Eucl. Sim:#
-
+    '''
     s = 2 * tf.matmul(y_pred, y_pred, transpose_b=True)
     diag_x = tf.reduce_sum(y_pred * y_pred, axis=-1, keepdims=True)
     diag_y = tf.reshape(tf.reduce_sum(y_pred * y_pred, axis=-1), (1, -1))
     loss = s - diag_x - diag_y
-
-    #loss = tf.reduce_mean(loss, axis=-1)
-    #loss = tf.reduce_sum(loss, axis=-1)
-    print("x loss dim: ", loss.shape)
-    #loss = 128 - loss
-    loss = loss/128/(128*128)
     #maximize:
     #loss = -loss
     '''
-    print("y loss dim: ", loss.shape, "loss: ", loss)
-    loss = tf.reshape(loss, [128, 1])
-    loss = tf.tile(loss, [1,61*61])
-    print("y loss dim: ", loss.shape, "loss: ", loss)
-    loss = tf.reshape(loss, [128,61,61])
-    print("y loss dim: ", loss.shape, "loss: ", loss)
-    #loss = tf.reduce_mean(loss, axis=0)
-    #print("y loss dim: ", loss.shape, "loss: ", loss)
-    '''
+    loss = tf.reduce_mean(loss, axis=-1)
+    loss = loss / config.batch_size
+    #loss = loss/128/(128*128)
+
     return loss
 
     #return tf.reduce_mean(loss, axis=-1)  # Note the `axis=-1`
-def my_loss_fn2_MemEntropy(y_true, y_pred):
+
+def MemEntropyLoss(y_true, y_pred):
     mem_etrp = tf.reduce_sum((-y_pred) * tf.math.log(y_pred + 1e-12))
-    print("mem_etrp shape: ", mem_etrp.shape)
+    #print("mem_etrp shape: ", mem_etrp.shape)
     loss = tf.reduce_mean(mem_etrp)
     return loss
 
@@ -366,73 +332,80 @@ def plot_training_process_history(history, curr_run_identifier):
     plt.legend(['train', 'valid'], loc='upper left')
     plt.show()
     plt.savefig('loss_history_' + curr_run_identifier + '.png')
+
+def apply_corr_rel_matrix_on_input(use_corr_rel_matrix_for_input, use_corr_rel_matrix_for_input_replace_by_epsilon,input_data,np_corr_rel_matrix):
+    if use_corr_rel_matrix_for_input:
+        if use_corr_rel_matrix_for_input_replace_by_epsilon:
+            print("Start replacing 0 values by epsilon  from the input")
+            input_data[input_data == 0] = tf.keras.backend.epsilon()
+            print("Finished replacing 0 values by epsilon  from the input")
+        print("Start removing irrelevant correlations from the input")
+        np_corr_rel_matrix_reshaped = np.reshape(np_corr_rel_matrix, (1, 1, 61, 61, 1))
+        input_data = input_data * np_corr_rel_matrix_reshaped
+        print("Finished removing irrelevant correlations from the input")
+    return input_data
+
 def main():
     # Configurations
-    use_data_set_version = 3
-    train_model = True
-    test_model = True
+    train_model = config.train_model
+    test_model = config.test_model
 
     # Variants of the MSCRED
-    guassian_noise_stddev = None        #MSCRED default: None, None für nichts oder Wert: 0.1 / denoising autoencoder
-    use_attention = False               #MSCRED default: True, Deaktivierung der Attention
-    use_convLSTM = False                #MSCRED default: True, Deaktivierung des ConvLSTM und Attention
-    use_memory_restriction = False       #MSCRED default: False, Restricts the output only on previously seen examples
+    guassian_noise_stddev = config.guassian_noise_stddev
+    use_attention = config.use_attention
+    use_convLSTM = config.use_convLSTM
+    use_memory_restriction = config.use_memory_restriction
 
-    use_loss_corr_rel_matrix = True     # Reconstruction error is only based on relevant correlations
-    loss_use_batch_sim_siam = False
-    use_corr_rel_matrix_for_input = False # input contains only relevant correlations, others set to zero
-    use_corr_rel_matrix_for_input_replace_by_epsilon = False # meaningful correlation that would be zero, are now near zero
-    plot_heatmap_of_rec_error = False
-    curr_run_identifier = "data_set_3_use_mscred_memory2_test5" #mat_data1_standardModell_eucl, mat_data1_standardModell_CorrMatLoss
+    use_loss_corr_rel_matrix = config.use_loss_corr_rel_matrix
+    loss_use_batch_sim_siam = config.loss_use_batch_sim_siam
+    use_corr_rel_matrix_for_input = config.use_corr_rel_matrix_for_input
+    use_corr_rel_matrix_for_input_replace_by_epsilon = config.use_corr_rel_matrix_for_input_replace_by_epsilon
+    plot_heatmap_of_rec_error = config.plot_heatmap_of_rec_error
+    curr_run_identifier = config.curr_run_identifier
     batch_size = config.batch_size
     epochs = config.epochs
     learning_rate = config.learning_rate
     step_size = config.step_max
-    early_stopping_patience = 5
-    split_train_test_ratio=0.1
+    early_stopping_patience = config.early_stopping_patience
+    split_train_test_ratio = config.split_train_test_ratio
 
     # Test Parameter:
-    use_corr_rel_matrix_in_eval = use_loss_corr_rel_matrix
-    threshold_selection_criterium = '99%' # 'max', '99%'
-    num_of_dim_over_threshold = 3 # normal: 0
-    num_of_dim_under_threshold = 20 # normal: 10 (higher as max. dim value) # 3: 20
-    print_att_dim_statistics = False
-    generate_deep_encodings = False
+    use_corr_rel_matrix_in_eval = config.use_corr_rel_matrix_in_eval
+    threshold_selection_criterium = config.threshold_selection_criterium
+    num_of_dim_over_threshold = config.num_of_dim_over_threshold
+    num_of_dim_under_threshold = config.num_of_dim_under_threshold
+    print_att_dim_statistics = config.print_att_dim_statistics
+    generate_deep_encodings = config.generate_deep_encodings
 
-    path= "../../../../data/pklein/MSCRED_Input_Data/"
-    if use_data_set_version == 1:
-        training_data_set_path =  path + "training_data_set.npy"
-        valid_split_save_path =  path + "training_data_set_test_split.npy"
-        test_matrix_path =  path + "training_data_set_failure.npy"
-        test_labels_y_path =  path + "training_data_set_failure_labels_test.npy"
-        test_matrix_path =  path + "test_data_set.npy"
-        test_labels_y_path =  path + "test_data_set_failure_labels.npy"
-    elif use_data_set_version == 2:
-        training_data_set_path =  path + "training_data_set_2_trainWoFailure.npy"
-        valid_split_save_path =  path + "training_data_set_2_test_split.npy"
-        test_matrix_path =  path + "training_data_set_2_trainWFailure.npy"
-        test_labels_y_path =  path + "training_data_set_2_failure_labels.npy"
-        test_matrix_path =  path + "test_data_set_2.npy"
-        test_labels_y_path =  path + "test_data_set_2_failure_labels.npy"
-    elif use_data_set_version == 3:
-        training_data_set_path = path + "training_data_set_3_trainWoFailure.npy"
-        valid_split_save_path = path + "training_data_set_3_test_split.npy"
-        test_matrix_path = path + "training_data_set_3_trainWFailure.npy"
-        test_labels_y_path = path + "training_data_set_3_failure_labels.npy"
-        test_matrix_path = path + "test_data_set_3.npy"
-        test_labels_y_path = path + "test_data_set_3_failure_labels.npy"
+    print("### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ")
+    print("curr_run_identifier: ", curr_run_identifier)
+    print("train_model: ", config.train_model, ", test_model: ", config.test_model, ", data set version: ", config.use_data_set_version)
+    print("### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ")
+    print("MSCRED Variant: Guassian Noise added: ", guassian_noise_stddev, "convLSTM: ",use_convLSTM, ", attention used: ", use_attention, ", memory restriction: ", use_memory_restriction)
+    print("Corrleation Matrix used as Loss: ", use_loss_corr_rel_matrix, ", Input: ",use_corr_rel_matrix_for_input, ", Replace zero with Epsilon: ", use_corr_rel_matrix_for_input_replace_by_epsilon)
+    print("Training related parameters: batchsize: ", batch_size, ", epochs: ", epochs,", learning_rate: ",learning_rate," early_stopping_patience: ", early_stopping_patience, " split_train_test_ratio: ", split_train_test_ratio)
+    print("### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ")
+    print("Testing related parameters: threshold_selection_criterium: ", threshold_selection_criterium, ", use_corr_rel_matrix_in_eval: ", use_corr_rel_matrix_in_eval, ", num_of_dim_over_threshold: ",
+          num_of_dim_over_threshold, " num_of_dim_under_threshold: ", num_of_dim_under_threshold, " split_train_test_ratio: ",
+          split_train_test_ratio)
 
-
+    training_data_set_path = config.training_data_set_path
+    valid_split_save_path = config.valid_split_save_path
+    test_matrix_path = config.test_matrix_path
+    test_labels_y_path = config.test_labels_y_path
+    test_matrix_path = config.test_matrix_path
+    test_labels_y_path = config.test_labels_y_path
     test_matrix_path = test_matrix_path
     test_labels_y_path = test_labels_y_path
-    feature_names_path = "../data/feature_names.npy"
+    feature_names_path = config.feature_names_path
+
     ### Create MSCRED model as TF graph
     print("config.relevant_features: ", config.relevant_features)
     train_failure_labels_y = np.load(test_labels_y_path)
     ### Load Correlation Relevance Matrix ###
     df_corr_rel_matrix = pd.read_csv('../data/Attribute_Correlation_Relevance_Matrix_v0.csv', sep=';',index_col=0)
     np_corr_rel_matrix = df_corr_rel_matrix.values
-    print("np_corr_rel_matrix: ", np_corr_rel_matrix.shape)
+    print("np_corr_rel_matrix shape: ", np_corr_rel_matrix.shape)
     print("Only ", np.sum(np_corr_rel_matrix)," of ",np_corr_rel_matrix.shape[0] * np_corr_rel_matrix.shape[1]," correlations")
 
     print('-------------------------------')
@@ -458,23 +431,10 @@ def main():
         #  Loading the training data
         curr_xTrainData = np.load(training_data_set_path)
         print("Loaded (failure-free training) data: ", curr_xTrainData.shape)
-        if loss_use_batch_sim_siam:
-            if use_data_set_version == 1:
-                curr_xTrainData = curr_xTrainData[:8960,:,:,:,:] # (9918, 5, 61, 61, 17)
-            elif use_data_set_version == 2:
-                curr_xTrainData = curr_xTrainData[:48640,:,:,:,:] # (49469, 5, 61, 61, 8)
-            print("Size adjusted (failure-free training) data: ", curr_xTrainData.shape)
 
         #Remove irrelevant correlations
-        if use_corr_rel_matrix_for_input:
-            if use_corr_rel_matrix_for_input_replace_by_epsilon:
-                print("Start replacing 0 values by epsilon  from the input")
-                curr_xTrainData[curr_xTrainData == 0] = tf.keras.backend.epsilon()
-                print("Finished replacing 0 values by epsilon  from the input")
-            print("Start removing irrelevant correlations from the input")
-            np_corr_rel_matrix_reshaped = np.reshape(np_corr_rel_matrix, (1,1,61,61,1))
-            curr_xTrainData = curr_xTrainData * np_corr_rel_matrix_reshaped
-            print("Finished removing irrelevant correlations from the input")
+        curr_xTrainData = apply_corr_rel_matrix_on_input(use_corr_rel_matrix_for_input, use_corr_rel_matrix_for_input_replace_by_epsilon,curr_xTrainData,np_corr_rel_matrix)
+
         X_train, X_valid = model_selection.train_test_split(curr_xTrainData, test_size=split_train_test_ratio, random_state=42)
         #X_train = curr_xTrainData[0:90,:,:,:,:]
         #X_valid = curr_xTrainData[90:99, :, :, :, :]
@@ -489,24 +449,25 @@ def main():
 
         # Training of the model
         opt = tf.keras.optimizers.Adam(learning_rate=learning_rate)
+        csv_logger = tf.keras.callbacks.CSVLogger('trainingLog_'+curr_run_identifier+'.log')
 
         if use_memory_restriction:
             if use_loss_corr_rel_matrix:
                 model_MSCRED.compile(optimizer=opt,
                                      loss=[corr_rel_matrix_weighted_loss(corr_rel_mat=np_corr_rel_matrix),
-                                           my_loss_fn2_MemEntropy],
+                                           MemEntropyLoss],
                                      loss_weights=[0.9998, 0.0002])
             else:
-                model_MSCRED.compile(optimizer=opt, loss=[my_loss_fn2_0, my_loss_fn2_MemEntropy],
+                model_MSCRED.compile(optimizer=opt, loss=[MseLoss, MemEntropyLoss],
                                      loss_weights=[0.9998, 0.0002])
         elif use_loss_corr_rel_matrix:
             model_MSCRED.compile(optimizer=opt, loss=corr_rel_matrix_weighted_loss(corr_rel_mat=np_corr_rel_matrix))
         elif loss_use_batch_sim_siam:
-            model_MSCRED.compile(optimizer=opt, loss=[my_loss_fn2_0, my_loss_fn2_1],
+            model_MSCRED.compile(optimizer=opt, loss=[MseLoss, SimLoss],
                                  loss_weights=[0.9, 0.1])
         else:
             model_MSCRED.compile(optimizer=opt, loss=tf.keras.losses.mse)
-        history = model_MSCRED.fit(X_train,X_train_y,epochs=epochs,batch_size=batch_size, shuffle=True, validation_split=0.1, callbacks=[es, mc]) # validation_data=(X_valid, X_valid_y)
+        history = model_MSCRED.fit(X_train,X_train_y,epochs=epochs,batch_size=batch_size, shuffle=True, validation_split=0.1, callbacks=[es, mc, csv_logger])
         plot_training_process_history(history=history, curr_run_identifier=curr_run_identifier)
 
     ### Test ###
@@ -522,28 +483,17 @@ def main():
 
         # Load validation split of the training data (used for defining the anomaly thresholds)
         X_valid = np.load(valid_split_save_path)
-        if use_corr_rel_matrix_for_input:
-            if use_corr_rel_matrix_for_input_replace_by_epsilon:
-                print("Start replacing 0 values by epsilon  from the input")
-                X_valid[X_valid == 0] = tf.keras.backend.epsilon()
-                print("Finished replacing 0 values by epsilon  from the input")
-            print("Start removing irrelevant correlations from the input")
-            np_corr_rel_matrix_reshaped = np.reshape(np_corr_rel_matrix, (1,1,61,61,1))
-            X_valid = X_valid * np_corr_rel_matrix_reshaped
-            print("Finished removing irrelevant correlations from the input")
+        # Remove irrelevant correlations
+        X_valid = apply_corr_rel_matrix_on_input(use_corr_rel_matrix_for_input,
+                                                         use_corr_rel_matrix_for_input_replace_by_epsilon,
+                                                         X_valid, np_corr_rel_matrix)
         X_valid_y = X_valid[:, step_size - 1, :, :, :]
 
         # Load test data (as used in PredM Siamese NN)
         X_test = np.load(test_matrix_path)
-        if use_corr_rel_matrix_for_input:
-            if use_corr_rel_matrix_for_input_replace_by_epsilon:
-                print("Start replacing 0 values by epsilon from the input")
-                X_test[X_test == 0] = tf.keras.backend.epsilon()
-                print("Finished replacing 0 values by epsilon from the input")
-            print("Start removing irrelevant correlations from the input")
-            np_corr_rel_matrix_reshaped = np.reshape(np_corr_rel_matrix, (1,1,61,61,1))
-            X_test = X_test * np_corr_rel_matrix_reshaped
-            print("Finished removing irrelevant correlations from the input")
+        X_test = apply_corr_rel_matrix_on_input(use_corr_rel_matrix_for_input,
+                                                 use_corr_rel_matrix_for_input_replace_by_epsilon,
+                                                 X_test, np_corr_rel_matrix)
         X_test_y = X_test[:, step_size - 1, :, :, :]
 
         # Load failure examples of the training data (failure examples excluded from the training) for further evaluation?
@@ -555,18 +505,12 @@ def main():
         if loss_use_batch_sim_siam or use_memory_restriction:
             X_valid_recon = model_MSCRED.predict(X_valid, batch_size=128)[0]
         else:
-            X_valid_recon = model_MSCRED.predict(X_valid, batch_size=128)  # [0]
+            X_valid_recon = model_MSCRED.predict(X_valid, batch_size=128)
         print("Reconstruction of validation data set done with shape :", X_valid_recon.shape) #((9, 61, 61, 3))
-        if loss_use_batch_sim_siam:
-            if use_data_set_version == 1:
-                X_test = X_test[:6528, :, :, :, :]#[:6528, :, :, :, :]
-            elif use_data_set_version == 2:
-                X_test = X_test[:1408, :, :, :, :]
-            X_test_recon = model_MSCRED.predict(X_test, batch_size=128)[0]
-        elif use_memory_restriction:
+        if loss_use_batch_sim_siam or use_memory_restriction:
             X_test_recon = model_MSCRED.predict(X_test, batch_size=128)[0]
         else:
-            X_test_recon = model_MSCRED.predict(X_test, batch_size=128)  # [0]
+            X_test_recon = model_MSCRED.predict(X_test, batch_size=128)
         print("Reconstruction of test data set done with shape :", X_test_recon.shape)  # ((9, 61, 61, 3))
 
         # Generate deep encodings
@@ -585,12 +529,12 @@ def main():
 
         ### Calcuation of reconstruction error on the validation data set ###
         recon_err_matrixes_valid, recon_err_perAttrib_valid, mse_per_example_valid = calculateReconstructionError(
-            real_input=X_valid_y, reconstructed_input=X_valid_recon, plot_heatmaps=False,
+            real_input=X_valid_y, reconstructed_input=X_valid_recon, plot_heatmaps=plot_heatmap_of_rec_error,
             use_corr_rel_matrix=use_corr_rel_matrix_in_eval, corr_rel_matrix=np_corr_rel_matrix)
 
         ### Calcuation of reconstruction error on the test data set ###
         recon_err_matrixes_test, recon_err_perAttrib_test, mse_per_example_test = calculateReconstructionError(
-            real_input=X_test_y, reconstructed_input=X_test_recon, plot_heatmaps=False,
+            real_input=X_test_y, reconstructed_input=X_test_recon, plot_heatmaps=plot_heatmap_of_rec_error,
             use_corr_rel_matrix=use_corr_rel_matrix_in_eval, corr_rel_matrix=np_corr_rel_matrix)
 
         # Define Thresholds for each dimension and attribute
