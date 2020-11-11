@@ -36,3 +36,6 @@ From preprocessed time series data (4ms sampling rate, 250 entries per second), 
 | 3 | / data / pklein / MSCRED_Input_Data | 5 | 125 | [5, 10, 15, 20, 25, 30, 40, 50, 60, 70, 80, 90, 100, 110, 125, 150, 200, 250] |
 
 The data can be found at the GPU server: <i>data/pklein/MSCRED_Input_Data/</i> 
+
+## Evaluation Results
+Results: https://seafile.rlp.net/f/ec678e4e9ee44883adb5/

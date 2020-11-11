@@ -5,6 +5,7 @@ import pandas as pd
 import sklearn.model_selection as model_selection
 import matplotlib.pyplot as plt
 import numpy as np
+import collections
 from MscredModel import MSCRED
 from MscredModel import Memory
 #from mscred import MemoryInstanceBased
@@ -79,7 +80,7 @@ def calculateReconstructionError(real_input, reconstructed_input, plot_heatmaps,
                                                  rec_error_matrix=reconstruction_error_matrixes[i_example,:,:,i_dim])
             '''
             # Alternative variants for calculation of reconstruction error
-            mse = np.mean(np.square(curr_matrix_input_real - curr_matrix_input_recon))
+            mse = np.mean(np.square(diff))
             diff_paper_formula = np.square(np.linalg.norm(diff, ord='fro'))
             # diff_paper_formula_axis0 = np.square(np.linalg.norm(diff, ord='fro', axis=0))
             # diff_paper_formula_axis1 = np.square(np.linalg.norm(diff, ord='fro', axis=1))
@@ -129,16 +130,15 @@ def calculateAnomalies(reconstructed_input, recon_err_perAttrib, thresholds, pri
 
     return eval_results, eval_results_over_all_dimensions, eval_results_over_all_dimensions_for_each_example
 
-# This method conducts the evaluation process and print out relevant results
+# This method conducts the evaluation process and print out relevant results. Validation data sets prodies no labels (since all examples are from the class no-failure)
 def printEvaluation2(reconstructed_input, eval_results_over_all_dimensions, feature_names, labels=None,
                      num_of_dim_under_threshold=0, num_of_dim_over_threshold=1000, mse_threshold=None, mse_values=None):
-    TP = 0
-    TN = 0
-    FP = 0
-    FN = 0
+    # Counter variables for no_failure and failure class
+    TP_NF = TN_NF = FP_NF = FN_NF = 0
+    TP_F = TN_F = FP_F = FN_F = 0
 
     for example_idx in range(reconstructed_input.shape[0]):
-        # idx_with_Anomaly_1 = np.where(eval_results_over_all_dimensions_f[example_idx,:pred.shape[1]] > num_of_dim_over_threshold)
+        # Adding 1 with the number of reconstruction errors over different dimension is reached, otherwise 0
         idx_with_Anomaly_1 = np.where(np.logical_and(
             num_of_dim_under_threshold > eval_results_over_all_dimensions[example_idx, :reconstructed_input.shape[1]],
             eval_results_over_all_dimensions[example_idx, :reconstructed_input.shape[1]] > num_of_dim_over_threshold))
@@ -151,44 +151,72 @@ def printEvaluation2(reconstructed_input, eval_results_over_all_dimensions, feat
             eval_results_over_all_dimensions[example_idx, reconstructed_input.shape[1]:] > num_of_dim_over_threshold))
         count_dim_anomalies_2 = eval_results_over_all_dimensions[example_idx, reconstructed_input.shape[1]:][
             idx_with_Anomaly_2]
-        # print(train_failure_labels_y[example_idx]," idx_with_Anomaly_1:  ", idx_with_Anomaly_1)
 
+        #Get ordered and combined dictonary of anomalous data streams
+        anomalies_combined_asc_ordered = order_anomalies(count_dim_anomalies_1, count_dim_anomalies_2,idx_with_Anomaly_1, idx_with_Anomaly_2, feature_names)
+        anomaly_detected = None
+        #Criterium for defining an anomaly
+        if ( mse_values[example_idx] > mse_threshold):
+        #if (feature_names[idx_with_Anomaly_1].shape[0] + feature_names[idx_with_Anomaly_2].shape[0]) > 1: # 0 if any occurend, 1 if double occurence (horizontal and vertical)
+            # Anomaly detected
+            anomaly_detected = True
+            if labels is not None:
+                if labels[example_idx] == 'no_failure':
+                    FN_NF += 1
+                    FP_F += 1
+                else:
+                    TN_NF += 1
+                    TP_F += 1
+        else:
+            # No Anomaly detected
+            anomaly_detected = False
+            if labels is not None:
+                if labels[example_idx] == 'no_failure':
+                    TP_NF += 1
+                    TN_F += 1
+                else:
+                    FP_NF += 1
+                    FN_F += 1
+
+        #Print output for each example
         if labels is not None:
+            '''
             print(labels[example_idx],": ", mse_values[example_idx], " idx_with_Anomaly_1:  ", feature_names[idx_with_Anomaly_1],
                   " with counts: ", count_dim_anomalies_1,"idx_with_Anomaly_2: ", feature_names[idx_with_Anomaly_2],
                   " with counts: ", count_dim_anomalies_2)
-            #Criterium for defining an anomaly
-            if ( mse_values[example_idx] > mse_threshold): # feature_names[idx_with_Anomaly_1].shape[0] + feature_names[idx_with_Anomaly_2].shape[0]) > 0:
-                # Anomaly detected
-                if labels[example_idx] == 'no_failure':
-                    FN = FN + 1
-                else:
-                    TN = TN + 1
-            else:
-                # No Anomaly detected
-                if labels[example_idx] == 'no_failure':
-                    TP = TP + 1
-                else:
-                    FP = FP + 1
+             '''
+            print("Label: ", labels[example_idx], " -  Detected Anomaly: ",anomaly_detected," based on: MSE:  %.8f" % mse_values[example_idx], "Anomalies combined: ",
+                  anomalies_combined_asc_ordered)
         else:
+            '''
             print("NoFailure: ", " idx_with_Anomaly_1:  ", feature_names[idx_with_Anomaly_1], " with counts: ",
                   count_dim_anomalies_1, feature_names[idx_with_Anomaly_2], " with counts: ",
                   count_dim_anomalies_2)
+            '''
+            print("Label: no_failure (validation) -  Detected Anomaly: ",anomaly_detected," based on: MSE:  %.8f" % mse_values[example_idx], "Anomalies combined: ",
+                  anomalies_combined_asc_ordered)
 
     if labels is not None:
-        print("Results: ")
-        print("No_Failure TP: ", TP)
-        print("No_Failure TN: ", TN)
-        print("No_Failure FP: ", FP)
-        print("No_Failure FN: ", FN)
-        prec = TP/(TP+FP)
-        rec = TP/(TP+FN)
-        acc = (TP+TN)/(TP+TN+FP+FN)
-        f1 = 2*((prec*rec)/(prec+rec))
-        print("No_Failure Acc: ", acc)
-        print("No_Failure Precision: ", prec)
-        print("No_Failure Recall: ", rec)
-        print("No_Failure F1: ", f1)
+        print("------------------------------------------------------------------------")
+        print("\nResults: ")
+        print("No_Failure TP: \t\t", TP_NF, "\t\tFailure TP: \t\t", TP_F)
+        print("No_Failure TN: \t\t", TN_NF, "\t\tFailure TN: \t\t", TN_F)
+        print("No_Failure FP: \t\t", FP_NF, "\t\tFailure FP: \t\t", FP_F)
+        print("No_Failure FN: \t\t", FN_NF, "\t\tFailure FN: \t\t", FN_F)
+        prec_NF = TP_NF/(TP_NF+FP_NF)
+        rec_NF = TP_NF/(TP_NF+FN_NF)
+        acc_NF = (TP_NF+TN_NF)/(TP_NF+TN_NF+FP_NF+FN_NF)
+        f1_NF = 2*((prec_NF*rec_NF)/(prec_NF+rec_NF))
+        prec_F = TP_F / (TP_F + FP_F)
+        rec_F = TP_F / (TP_F + FN_F)
+        acc_F = (TP_F + TN_F) / (TP_F + TN_F + FP_F + FN_F)
+        f1_F = 2 * ((prec_F * rec_F) / (prec_F + rec_F))
+        print("------------------------------------------------------------------------")
+        print("No_Failure Acc: \t %.3f" % acc_NF, "\t\tFailure Acc: \t\t %.3f" % acc_F)
+        print("No_Failure Precision: \t %.3f" % prec_NF, "\t\tFailure Precision: \t %.3f" % prec_F)
+        print("No_Failure Recall: \t %.3f" %rec_NF, "\t\tFailure Recall: \t %.3f" % rec_F)
+        print("No_Failure F1: \t \t %.3f" % f1_NF, "\t\tFailure F1:  \t\t %.3f" % f1_F)
+        print("------------------------------------------------------------------------")
 
 # Not used anymore
 def plot_heatmap_of_reconstruction_error(input, output, rec_error_matrix, id, dim):
@@ -344,6 +372,25 @@ def apply_corr_rel_matrix_on_input(use_corr_rel_matrix_for_input, use_corr_rel_m
         input_data = input_data * np_corr_rel_matrix_reshaped
         print("Finished removing irrelevant correlations from the input")
     return input_data
+def order_anomalies(count_dim_anomalies_1, count_dim_anomalies_2,idx_with_Anomaly_1, idx_with_Anomaly_2, feature_names):
+    # Combing anomalous attributes with its anomaly count in a dictonary
+    d1 = dict(zip(count_dim_anomalies_1, feature_names[idx_with_Anomaly_1]))
+    d2 = dict(zip(count_dim_anomalies_2, feature_names[idx_with_Anomaly_2]))
+
+    # Order dictionaries according number of anomouls occurences
+    od1 = dict(collections.OrderedDict(sorted(d1.items(), reverse=True)))
+    od2 = dict(collections.OrderedDict(sorted(d2.items(), reverse=True)))
+    # Switch key amd value which is necessary for merging both dicts
+    od1_flipped_dict = dict(zip(od1.values(), od1.keys()))
+    od2_flipped_dict = dict(zip(od2.values(), od2.keys()))
+    # Merging both dicts
+    merged_od1_od2 = dict(collections.Counter(od1_flipped_dict) + collections.Counter(od2_flipped_dict))
+    c_flipped_dict = dict(zip(merged_od1_od2.values(), merged_od1_od2.keys()))
+    # Switch key amd value again which is necessary for ordering
+    anomalies_combined_asc_ordered = dict(collections.OrderedDict(sorted(c_flipped_dict.items(), reverse=True)))
+    # Switch key amd value for better readability
+    anomalies_combined_asc_ordered_flipped_dict = dict(zip(anomalies_combined_asc_ordered.values(), anomalies_combined_asc_ordered.keys()))
+    return anomalies_combined_asc_ordered_flipped_dict #dict(anomalies_combined_asc_ordered)
 
 def main():
     # Configurations
@@ -388,6 +435,7 @@ def main():
     print("Testing related parameters: threshold_selection_criterium: ", threshold_selection_criterium, ", use_corr_rel_matrix_in_eval: ", use_corr_rel_matrix_in_eval, ", num_of_dim_over_threshold: ",
           num_of_dim_over_threshold, " num_of_dim_under_threshold: ", num_of_dim_under_threshold, " split_train_test_ratio: ",
           split_train_test_ratio)
+    print("### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ")
 
     training_data_set_path = config.training_data_set_path
     valid_split_save_path = config.valid_split_save_path

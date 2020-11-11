@@ -13,7 +13,7 @@ class Configuration:
         ###
         # General Configuration
         ###
-        self.curr_run_identifier = "data_set_3_use_mscred_memory2_test6"
+        self.curr_run_identifier = "model_4"
         self.use_data_set_version = 3
         self.train_model = False
         self.test_model = True
@@ -23,12 +23,12 @@ class Configuration:
         ###
         # Variants of the MSCRED
         self.guassian_noise_stddev = None       # MSCRED default: None, None für nichts oder Wert: 0.1 / denoising autoencoder
-        self.use_attention = True               # MSCRED default: True, Deaktivierung der Attention, erfordert ConvLSTM
+        self.use_attention = False               # MSCRED default: True, Deaktivierung der Attention, erfordert ConvLSTM
         self.keras_attention_layer_instead_of_own_impl = False  # MSCRED default: False, ansonsten andere Attention als im peper beschrieben
-        self.use_convLSTM = True                # MSCRED default: True, Deaktivierung des ConvLSTM und Attention mittels False
+        self.use_convLSTM = False                # MSCRED default: True, Deaktivierung des ConvLSTM und Attention mittels False
         self.use_memory_restriction = False     # MSCRED default: False, Restricts the output only on previously seen examples
 
-        self.use_loss_corr_rel_matrix = False   # MSCRED default: False, Reconstruction error is only based on correlations that are manually defined as relevant
+        self.use_loss_corr_rel_matrix = True   # MSCRED default: False, Reconstruction error is only based on correlations that are manually defined as relevant
         self.loss_use_batch_sim_siam = False    # MSCRED default: False,
         self.use_corr_rel_matrix_for_input = False  # MSCRED default: False,  input contains only relevant correlations, others set to zero
         self.use_corr_rel_matrix_for_input_replace_by_epsilon = False  # MSCRED default: False,  meaningful correlation that would be zero, are now near zero
@@ -37,11 +37,11 @@ class Configuration:
         self.num_datastreams = 61
         self.batch_size = 128
         self.dim_of_dataset = 18  # 1: 8 2: 17 3:18
-        self.epochs = 1
+        self.epochs = 300
         self.learning_rate = 0.001
         self.early_stopping_patience = 3
         self.split_train_test_ratio = 0.1
-        self.filter_dimension_encoder = [32, 64, 128, 256]  # [16, 32, 64, 128] #[32, 64, 128, 256] #[64, 128, 256, 512]
+        self.filter_dimension_encoder = [32, 64, 128, 256] #[32, 64, 128, 256]  # [16, 32, 64, 128] #[32, 64, 128, 256] #[64, 128, 256, 512]
         self.memory_size = 100
 
         ###
@@ -49,11 +49,12 @@ class Configuration:
         ###
         self.use_corr_rel_matrix_in_eval = self.use_loss_corr_rel_matrix
         self.threshold_selection_criterium = '99%'  # 'max', '99%' #[.25, .5, .75, 0.9, 0.95, 0.97, 0.99]
-        self.num_of_dim_over_threshold = 3  # normal: 0
+        self.num_of_dim_over_threshold = 1  # normal: 0
         self.num_of_dim_under_threshold = 20  # normal: 10 (higher as max. dim value) # 3: 20
         self.print_att_dim_statistics = False
         self.generate_deep_encodings = False
         self.plot_heatmap_of_rec_error = False
+        self.remove_hard_to_detect_stuff = ['low_wear']
 
         ###
         # Data Generation Configuration
