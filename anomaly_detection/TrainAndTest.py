@@ -27,7 +27,7 @@ config = Configuration()
 # Returns
 # thresholds: np matrix (dim, 2*attributes) with thresholds for each dimension and attribute (used in MSCRED-Framework)
 # mse_threshold: mse threshold value considering the full example
-def calculateThreshold(reconstructed_input, recon_err_perAttrib_valid, threshold_selection_criterium='99%', mse_per_example= None):
+def calculateThreshold(reconstructed_input, recon_err_perAttrib_valid, threshold_selection_criterium='99%', mse_per_example= None, print_pandas_statistics_for_validation=False):
     thresholds = np.zeros((reconstructed_input.shape[3], reconstructed_input.shape[1] + reconstructed_input.shape[2]))
     mse_threshold = None
     for i_dim in range(reconstructed_input.shape[3]):
@@ -38,8 +38,9 @@ def calculateThreshold(reconstructed_input, recon_err_perAttrib_valid, threshold
         df_curr_dim = pd.DataFrame(data_curr_dim)
         # print(df_curr_dim.head())
         df_curr_dim_described = df_curr_dim.describe(percentiles=[.25, .5, .75, 0.9, 0.95, 0.97, 0.99])
-        print("Statistics of dim: ", i_dim, " from healthy data of the validation data set: ")
-        print(df_curr_dim_described)
+        if print_pandas_statistics_for_validation:
+            print("Statistics of dim: ", i_dim, " from healthy data of the validation data set: ")
+            print(df_curr_dim_described)
         # get max value for each sensor
         # max = df_curr_dim_described.loc['max', :]
         # print("max: ", max)
@@ -48,8 +49,9 @@ def calculateThreshold(reconstructed_input, recon_err_perAttrib_valid, threshold
     if mse_per_example is not None:
         df_mse = pd.DataFrame(mse_per_example)
         df_mse_described = df_mse.describe(percentiles=[.25, .5, .75, 0.9, 0.95, 0.97, 0.99])
-        print("Statistics for mse from healthy data of the validation data set: ")
-        print(df_mse_described)
+        if print_pandas_statistics_for_validation:
+            print("Statistics for mse from healthy data of the validation data set: ")
+            print(df_mse_described)
         mse_threshold = df_mse_described.loc[threshold_selection_criterium].values
         print("Selected mse threshold: ", mse_threshold)
 
@@ -132,7 +134,8 @@ def calculateAnomalies(reconstructed_input, recon_err_perAttrib, thresholds, pri
 
 # This method conducts the evaluation process and print out relevant results. Validation data sets prodies no labels (since all examples are from the class no-failure)
 def printEvaluation2(reconstructed_input, eval_results_over_all_dimensions, feature_names, labels=None,
-                     num_of_dim_under_threshold=0, num_of_dim_over_threshold=1000, mse_threshold=None, mse_values=None):
+                     num_of_dim_under_threshold=0, num_of_dim_over_threshold=1000, mse_threshold=None, mse_values=None,
+                     use_attribute_anomaly_as_condition=True, print_all_examples=True):
     # Counter variables for no_failure and failure class
     TP_NF = TN_NF = FP_NF = FN_NF = 0
     TP_F = TN_F = FP_F = FN_F = 0
@@ -154,12 +157,20 @@ def printEvaluation2(reconstructed_input, eval_results_over_all_dimensions, feat
 
         #Get ordered and combined dictonary of anomalous data streams
         anomalies_combined_asc_ordered = order_anomalies(count_dim_anomalies_1, count_dim_anomalies_2,idx_with_Anomaly_1, idx_with_Anomaly_2, feature_names)
-        anomaly_detected = None
-        #Criterium for defining an anomaly
-        if ( mse_values[example_idx] > mse_threshold):
-        #if (feature_names[idx_with_Anomaly_1].shape[0] + feature_names[idx_with_Anomaly_2].shape[0]) > 1: # 0 if any occurend, 1 if double occurence (horizontal and vertical)
-            # Anomaly detected
-            anomaly_detected = True
+        anomaly_detected = False
+
+
+        #Decide which condition / criterium is used for detecting anomalies
+        if use_attribute_anomaly_as_condition:
+            # A feature is seen as anomalous if row and column is higher than the threshold value
+            if (feature_names[idx_with_Anomaly_1].shape[0] + feature_names[idx_with_Anomaly_2].shape[0]) > 1: # 0 if any occurend, 1 if double occurence (horizontal and vertical)
+                anomaly_detected = True
+        else:
+            # A feature is seen as anomalous if the mse of its reconstruction is higher than the threshold
+            if (mse_values[example_idx] > mse_threshold):
+                anomaly_detected = True
+
+        if anomaly_detected:
             if labels is not None:
                 if labels[example_idx] == 'no_failure':
                     FN_NF += 1
@@ -169,7 +180,6 @@ def printEvaluation2(reconstructed_input, eval_results_over_all_dimensions, feat
                     TP_F += 1
         else:
             # No Anomaly detected
-            anomaly_detected = False
             if labels is not None:
                 if labels[example_idx] == 'no_failure':
                     TP_NF += 1
@@ -185,16 +195,18 @@ def printEvaluation2(reconstructed_input, eval_results_over_all_dimensions, feat
                   " with counts: ", count_dim_anomalies_1,"idx_with_Anomaly_2: ", feature_names[idx_with_Anomaly_2],
                   " with counts: ", count_dim_anomalies_2)
              '''
-            print("Label: ", labels[example_idx], " -  Detected Anomaly: ",anomaly_detected," based on: MSE:  %.8f" % mse_values[example_idx], "Anomalies combined: ",
-                  anomalies_combined_asc_ordered)
+            if print_all_examples:
+                print("Label: ", labels[example_idx], " -  Detected Anomaly: ",anomaly_detected," based on: MSE:  %.8f" % mse_values[example_idx], "Anomalies combined: ",
+                      anomalies_combined_asc_ordered)
         else:
             '''
             print("NoFailure: ", " idx_with_Anomaly_1:  ", feature_names[idx_with_Anomaly_1], " with counts: ",
                   count_dim_anomalies_1, feature_names[idx_with_Anomaly_2], " with counts: ",
                   count_dim_anomalies_2)
             '''
-            print("Label: no_failure (validation) -  Detected Anomaly: ",anomaly_detected," based on: MSE:  %.8f" % mse_values[example_idx], "Anomalies combined: ",
-                  anomalies_combined_asc_ordered)
+            if print_all_examples:
+                print("Label: no_failure (validation) -  Detected Anomaly: ",anomaly_detected," based on: MSE:  %.8f" % mse_values[example_idx], "Anomalies combined: ",
+                      anomalies_combined_asc_ordered)
 
     if labels is not None:
         print("------------------------------------------------------------------------")
@@ -423,6 +435,16 @@ def main():
     num_of_dim_under_threshold = config.num_of_dim_under_threshold
     print_att_dim_statistics = config.print_att_dim_statistics
     generate_deep_encodings = config.generate_deep_encodings
+    use_attribute_anomaly_as_condition = config.use_attribute_anomaly_as_condition
+    print_all_examples = config.print_all_examples
+    print_pandas_statistics_for_validation = config.print_pandas_statistics_for_validation
+
+    use_mass_evaulation = config.use_mass_evaulation
+    threshold_selection_criterium_list = config.threshold_selection_criterium_list
+    num_of_dim_over_threshold_list = config.num_of_dim_over_threshold_list
+    num_of_dim_under_threshold_list = config.num_of_dim_under_threshold_list
+    use_corr_rel_matrix_in_eval_list = config.use_corr_rel_matrix_in_eval_list
+    use_attribute_anomaly_as_condition_list = config.use_attribute_anomaly_as_condition_list
 
     print("### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ")
     print("curr_run_identifier: ", curr_run_identifier)
@@ -432,9 +454,12 @@ def main():
     print("Corrleation Matrix used as Loss: ", use_loss_corr_rel_matrix, ", Input: ",use_corr_rel_matrix_for_input, ", Replace zero with Epsilon: ", use_corr_rel_matrix_for_input_replace_by_epsilon)
     print("Training related parameters: batchsize: ", batch_size, ", epochs: ", epochs,", learning_rate: ",learning_rate," early_stopping_patience: ", early_stopping_patience, " split_train_test_ratio: ", split_train_test_ratio)
     print("### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ")
-    print("Testing related parameters: threshold_selection_criterium: ", threshold_selection_criterium, ", use_corr_rel_matrix_in_eval: ", use_corr_rel_matrix_in_eval, ", num_of_dim_over_threshold: ",
-          num_of_dim_over_threshold, " num_of_dim_under_threshold: ", num_of_dim_under_threshold, " split_train_test_ratio: ",
-          split_train_test_ratio)
+    if use_mass_evaulation == False:
+        print("Testing related parameters: threshold_selection_criterium: ", threshold_selection_criterium, ", use_corr_rel_matrix_in_eval: ", use_corr_rel_matrix_in_eval, ", num_of_dim_over_threshold: ",
+              num_of_dim_over_threshold, " num_of_dim_under_threshold: ", num_of_dim_under_threshold, " split_train_test_ratio: ",
+              split_train_test_ratio)
+    else:
+        print("use_mass_evaulation: ", use_mass_evaulation)
     print("### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ")
 
     training_data_set_path = config.training_data_set_path
@@ -575,36 +600,95 @@ def main():
         X_valid_y = np.squeeze(X_valid_y)
         X_test_y = np.squeeze(X_test_y)
 
-        ### Calcuation of reconstruction error on the validation data set ###
-        recon_err_matrixes_valid, recon_err_perAttrib_valid, mse_per_example_valid = calculateReconstructionError(
-            real_input=X_valid_y, reconstructed_input=X_valid_recon, plot_heatmaps=plot_heatmap_of_rec_error,
-            use_corr_rel_matrix=use_corr_rel_matrix_in_eval, corr_rel_matrix=np_corr_rel_matrix)
+        if use_mass_evaulation:
 
-        ### Calcuation of reconstruction error on the test data set ###
-        recon_err_matrixes_test, recon_err_perAttrib_test, mse_per_example_test = calculateReconstructionError(
-            real_input=X_test_y, reconstructed_input=X_test_recon, plot_heatmaps=plot_heatmap_of_rec_error,
-            use_corr_rel_matrix=use_corr_rel_matrix_in_eval, corr_rel_matrix=np_corr_rel_matrix)
+            test_configurations = list(zip(threshold_selection_criterium_list, num_of_dim_over_threshold_list,
+                                           num_of_dim_under_threshold_list, use_corr_rel_matrix_in_eval_list, use_attribute_anomaly_as_condition_list))
+            for i in range(len(test_configurations)):
+                threshold_selection_criterium, num_of_dim_over_threshold, num_of_dim_under_threshold, use_corr_rel_matrix_in_eval,\
+                use_attribute_anomaly_as_condition = test_configurations[i][0], test_configurations[i][1], test_configurations[i][2], test_configurations[i][3], test_configurations[i][4]
+                print("threshold_selection_criterium: ", threshold_selection_criterium, " with: ",num_of_dim_over_threshold,"/",num_of_dim_under_threshold, ". CorrMatrix: ", use_corr_rel_matrix_in_eval,"Anomaly based on Attributes: ", use_attribute_anomaly_as_condition)
 
-        # Define Thresholds for each dimension and attribute
-        thresholds, mse_threshold = calculateThreshold(reconstructed_input=X_valid_recon,recon_err_perAttrib_valid=recon_err_perAttrib_valid,
-                                                               threshold_selection_criterium=threshold_selection_criterium, mse_per_example=mse_per_example_valid)
+                ### Calcuation of reconstruction error on the validation data set ###
+                recon_err_matrixes_valid, recon_err_perAttrib_valid, mse_per_example_valid = calculateReconstructionError(
+                    real_input=X_valid_y, reconstructed_input=X_valid_recon, plot_heatmaps=plot_heatmap_of_rec_error,
+                    use_corr_rel_matrix=use_corr_rel_matrix_in_eval, corr_rel_matrix=np_corr_rel_matrix)
 
-        # Evaluate
-        eval_results, eval_results_over_all_dimensions, eval_results_over_all_dimensions_for_each_example = calculateAnomalies(reconstructed_input=X_valid_recon, recon_err_perAttrib=recon_err_perAttrib_valid, thresholds=thresholds, print_att_dim_statistics = print_att_dim_statistics)
-        eval_results_f, eval_results_over_all_dimensions_f, eval_results_over_all_dimensions_for_each_example_f = calculateAnomalies(reconstructed_input=X_test_recon, recon_err_perAttrib=recon_err_perAttrib_test, thresholds=thresholds, print_att_dim_statistics = print_att_dim_statistics)
+                ### Calcuation of reconstruction error on the test data set ###
+                recon_err_matrixes_test, recon_err_perAttrib_test, mse_per_example_test = calculateReconstructionError(
+                    real_input=X_test_y, reconstructed_input=X_test_recon, plot_heatmaps=plot_heatmap_of_rec_error,
+                    use_corr_rel_matrix=use_corr_rel_matrix_in_eval, corr_rel_matrix=np_corr_rel_matrix)
 
-        # Get Positions of anomalies
-        feature_names = np.load(feature_names_path)
-        print("Feature Names Overview: ", feature_names)
+                # Define Thresholds for each dimension and attribute
+                thresholds, mse_threshold = calculateThreshold(reconstructed_input=X_valid_recon,recon_err_perAttrib_valid=recon_err_perAttrib_valid,
+                                                                       threshold_selection_criterium=threshold_selection_criterium, mse_per_example=mse_per_example_valid, print_pandas_statistics_for_validation=print_pandas_statistics_for_validation)
 
-        print("#### Evaluate No-FAILURES / Validation data set #####")
-        printEvaluation2(reconstructed_input=X_valid_recon, eval_results_over_all_dimensions=eval_results_over_all_dimensions, feature_names=feature_names,
-                        num_of_dim_under_threshold=num_of_dim_under_threshold, num_of_dim_over_threshold=num_of_dim_over_threshold,
-                         mse_threshold=mse_threshold, mse_values=mse_per_example_valid)
-        print("#### Evaluate No-FAILURES and FAILURES / Test data set #####")
-        printEvaluation2(reconstructed_input=X_test_recon, eval_results_over_all_dimensions=eval_results_over_all_dimensions_f, feature_names=feature_names, labels = train_failure_labels_y,
-                        num_of_dim_under_threshold=num_of_dim_under_threshold, num_of_dim_over_threshold=num_of_dim_over_threshold,
-                         mse_threshold=mse_threshold, mse_values=mse_per_example_test)
+                # Evaluate
+                eval_results, eval_results_over_all_dimensions, eval_results_over_all_dimensions_for_each_example = calculateAnomalies(reconstructed_input=X_valid_recon, recon_err_perAttrib=recon_err_perAttrib_valid, thresholds=thresholds, print_att_dim_statistics = print_att_dim_statistics)
+                eval_results_f, eval_results_over_all_dimensions_f, eval_results_over_all_dimensions_for_each_example_f = calculateAnomalies(reconstructed_input=X_test_recon, recon_err_perAttrib=recon_err_perAttrib_test, thresholds=thresholds, print_att_dim_statistics = print_att_dim_statistics)
+
+                # Get Positions of anomalies
+                feature_names = np.load(feature_names_path)
+                #print("Feature Names Overview: ", feature_names)
+
+                print("#### Evaluate No-FAILURES / Validation data set #####")
+                printEvaluation2(reconstructed_input=X_valid_recon, eval_results_over_all_dimensions=eval_results_over_all_dimensions, feature_names=feature_names,
+                                num_of_dim_under_threshold=num_of_dim_under_threshold, num_of_dim_over_threshold=num_of_dim_over_threshold,
+                                 mse_threshold=mse_threshold, mse_values=mse_per_example_valid, use_attribute_anomaly_as_condition=use_attribute_anomaly_as_condition,
+                                 print_all_examples=print_all_examples)
+                print("#### Evaluate No-FAILURES and FAILURES / Test data set #####")
+                printEvaluation2(reconstructed_input=X_test_recon, eval_results_over_all_dimensions=eval_results_over_all_dimensions_f, feature_names=feature_names, labels = train_failure_labels_y,
+                                num_of_dim_under_threshold=num_of_dim_under_threshold, num_of_dim_over_threshold=num_of_dim_over_threshold,
+                                 mse_threshold=mse_threshold, mse_values=mse_per_example_test, use_attribute_anomaly_as_condition=use_attribute_anomaly_as_condition,
+                                 print_all_examples=print_all_examples)
+        else:
+            ### Calcuation of reconstruction error on the validation data set ###
+            recon_err_matrixes_valid, recon_err_perAttrib_valid, mse_per_example_valid = calculateReconstructionError(
+                real_input=X_valid_y, reconstructed_input=X_valid_recon, plot_heatmaps=plot_heatmap_of_rec_error,
+                use_corr_rel_matrix=use_corr_rel_matrix_in_eval, corr_rel_matrix=np_corr_rel_matrix)
+
+            ### Calcuation of reconstruction error on the test data set ###
+            recon_err_matrixes_test, recon_err_perAttrib_test, mse_per_example_test = calculateReconstructionError(
+                real_input=X_test_y, reconstructed_input=X_test_recon, plot_heatmaps=plot_heatmap_of_rec_error,
+                use_corr_rel_matrix=use_corr_rel_matrix_in_eval, corr_rel_matrix=np_corr_rel_matrix)
+
+            # Define Thresholds for each dimension and attribute
+            thresholds, mse_threshold = calculateThreshold(reconstructed_input=X_valid_recon,
+                                                           recon_err_perAttrib_valid=recon_err_perAttrib_valid,
+                                                           threshold_selection_criterium=threshold_selection_criterium,
+                                                           mse_per_example=mse_per_example_valid,
+                                                           print_pandas_statistics_for_validation=print_pandas_statistics_for_validation)
+
+            # Evaluate
+            eval_results, eval_results_over_all_dimensions, eval_results_over_all_dimensions_for_each_example = calculateAnomalies(
+                reconstructed_input=X_valid_recon, recon_err_perAttrib=recon_err_perAttrib_valid, thresholds=thresholds,
+                print_att_dim_statistics=print_att_dim_statistics)
+            eval_results_f, eval_results_over_all_dimensions_f, eval_results_over_all_dimensions_for_each_example_f = calculateAnomalies(
+                reconstructed_input=X_test_recon, recon_err_perAttrib=recon_err_perAttrib_test, thresholds=thresholds,
+                print_att_dim_statistics=print_att_dim_statistics)
+
+            # Get Positions of anomalies
+            feature_names = np.load(feature_names_path)
+            # print("Feature Names Overview: ", feature_names)
+
+            print("#### Evaluate No-FAILURES / Validation data set #####")
+            printEvaluation2(reconstructed_input=X_valid_recon,
+                             eval_results_over_all_dimensions=eval_results_over_all_dimensions,
+                             feature_names=feature_names,
+                             num_of_dim_under_threshold=num_of_dim_under_threshold,
+                             num_of_dim_over_threshold=num_of_dim_over_threshold,
+                             mse_threshold=mse_threshold, mse_values=mse_per_example_valid,
+                             use_attribute_anomaly_as_condition=use_attribute_anomaly_as_condition,
+                             print_all_examples=print_all_examples)
+            print("#### Evaluate No-FAILURES and FAILURES / Test data set #####")
+            printEvaluation2(reconstructed_input=X_test_recon,
+                             eval_results_over_all_dimensions=eval_results_over_all_dimensions_f,
+                             feature_names=feature_names, labels=train_failure_labels_y,
+                             num_of_dim_under_threshold=num_of_dim_under_threshold,
+                             num_of_dim_over_threshold=num_of_dim_over_threshold,
+                             mse_threshold=mse_threshold, mse_values=mse_per_example_test,
+                             use_attribute_anomaly_as_condition=use_attribute_anomaly_as_condition,
+                             print_all_examples=print_all_examples)
 
 
 if __name__ == '__main__':

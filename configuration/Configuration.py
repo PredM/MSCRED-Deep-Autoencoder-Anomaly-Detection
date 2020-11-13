@@ -13,7 +13,7 @@ class Configuration:
         ###
         # General Configuration
         ###
-        self.curr_run_identifier = "model_4"
+        self.curr_run_identifier = "model_5_2"
         self.use_data_set_version = 3
         self.train_model = False
         self.test_model = True
@@ -23,9 +23,9 @@ class Configuration:
         ###
         # Variants of the MSCRED
         self.guassian_noise_stddev = None       # MSCRED default: None, None für nichts oder Wert: 0.1 / denoising autoencoder
-        self.use_attention = False               # MSCRED default: True, Deaktivierung der Attention, erfordert ConvLSTM
-        self.keras_attention_layer_instead_of_own_impl = False  # MSCRED default: False, ansonsten andere Attention als im peper beschrieben
-        self.use_convLSTM = False                # MSCRED default: True, Deaktivierung des ConvLSTM und Attention mittels False
+        self.use_attention = True               # MSCRED default: True, Deaktivierung der Attention, erfordert ConvLSTM
+        self.keras_attention_layer_instead_of_own_impl = True  # MSCRED default: False, ansonsten andere Attention als im peper beschrieben
+        self.use_convLSTM = True                # MSCRED default: True, Deaktivierung des ConvLSTM und Attention mittels False
         self.use_memory_restriction = False     # MSCRED default: False, Restricts the output only on previously seen examples
 
         self.use_loss_corr_rel_matrix = True   # MSCRED default: False, Reconstruction error is only based on correlations that are manually defined as relevant
@@ -41,20 +41,31 @@ class Configuration:
         self.learning_rate = 0.001
         self.early_stopping_patience = 3
         self.split_train_test_ratio = 0.1
-        self.filter_dimension_encoder = [32, 64, 128, 256] #[32, 64, 128, 256]  # [16, 32, 64, 128] #[32, 64, 128, 256] #[64, 128, 256, 512]
-        self.memory_size = 100
+        self.filter_dimension_encoder = [8, 16, 32, 64]  #[32, 64, 128, 256]  # [16, 32, 64, 128] #[32, 64, 128, 256] #[64, 128, 256, 512]
+        self.memory_size = 300
 
         ###
         # Test Evaluation
         ###
         self.use_corr_rel_matrix_in_eval = self.use_loss_corr_rel_matrix
         self.threshold_selection_criterium = '99%'  # 'max', '99%' #[.25, .5, .75, 0.9, 0.95, 0.97, 0.99]
-        self.num_of_dim_over_threshold = 1  # normal: 0
+        self.num_of_dim_over_threshold = 3  # normal: 0
         self.num_of_dim_under_threshold = 20  # normal: 10 (higher as max. dim value) # 3: 20
         self.print_att_dim_statistics = False
         self.generate_deep_encodings = False
         self.plot_heatmap_of_rec_error = False
         self.remove_hard_to_detect_stuff = ['low_wear']
+        self.use_attribute_anomaly_as_condition = True                          # MSCRED default: True
+        self.print_all_examples = True
+
+        self.use_mass_evaulation = False
+        # Mass evaluation parameters
+        self.threshold_selection_criterium_list = ['99%', '99%', '99%', '99%', '97%', '97%', 'max', 'max', 'max', '90%', '97%', '97%']
+        self.num_of_dim_over_threshold_list = [1, 1, 3, 3, 3, 3, 1, 1, 1, 1, 1, 1]
+        self.num_of_dim_under_threshold_list = [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20]
+        self.use_corr_rel_matrix_in_eval_list = [False, True, False, True, False, True, False, True, True, True, False, True]
+        self.use_attribute_anomaly_as_condition_list = [True, True, True, True, True, True, True, True, True, False, False, False]
+        self.print_pandas_statistics_for_validation = self.use_mass_evaulation
 
         ###
         # Data Generation Configuration
