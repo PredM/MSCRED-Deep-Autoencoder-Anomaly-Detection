@@ -32,16 +32,16 @@ class MSCRED(tf.keras.Model):
             signatureMatrixInput_ = signatureMatrixInput
 
 
-        conv2d_layer1 = tf.keras.layers.Conv2D(filters=config.filter_dimension_encoder[0], strides=[1, 1], kernel_size=[3, 3],
+        conv2d_layer1 = tf.keras.layers.Conv2D(filters=config.filter_dimension_encoder[0], strides=config.strides_encoder[0], kernel_size=config.kernel_size_encoder[0],
                                                padding='same',
                                                activation='selu')
-        conv2d_layer2 = tf.keras.layers.Conv2D(filters=config.filter_dimension_encoder[1], strides=[2, 2], kernel_size=[3, 3],
+        conv2d_layer2 = tf.keras.layers.Conv2D(filters=config.filter_dimension_encoder[1], strides=config.strides_encoder[1], kernel_size=config.kernel_size_encoder[1],
                                                padding='same',
                                                activation='selu')
-        conv2d_layer3 = tf.keras.layers.Conv2D(filters=config.filter_dimension_encoder[2], strides=[2, 2], kernel_size=[2, 2],
+        conv2d_layer3 = tf.keras.layers.Conv2D(filters=config.filter_dimension_encoder[2], strides=config.strides_encoder[2], kernel_size=config.kernel_size_encoder[2],
                                                padding='same',
                                                activation='selu')
-        conv2d_layer4 = tf.keras.layers.Conv2D(filters=config.filter_dimension_encoder[3], strides=[2, 2], kernel_size=[2, 2],
+        conv2d_layer4 = tf.keras.layers.Conv2D(filters=config.filter_dimension_encoder[3], strides=config.strides_encoder[3], kernel_size=config.kernel_size_encoder[3],
                                                padding='same',
                                                activation='selu')
         convLISTM_layer1 = tf.keras.layers.ConvLSTM2D(filters=config.filter_dimension_encoder[0], strides=1, kernel_size=[2, 2], padding='same',
@@ -55,17 +55,17 @@ class MSCRED(tf.keras.Model):
         convLISTM_layer4 = tf.keras.layers.ConvLSTM2D(filters=config.filter_dimension_encoder[3], strides=1, kernel_size=[2, 2], padding='same',
                                                       return_sequences=use_attention, name="ConvLSTM4")
 
-        conv2d_trans_layer4 = tf.keras.layers.Conv2DTranspose(filters=config.filter_dimension_encoder[2], strides=[2, 2],
-                                                              kernel_size=[2, 2], padding='same',
+        conv2d_trans_layer4 = tf.keras.layers.Conv2DTranspose(filters=config.filter_dimension_encoder[2], strides=config.strides_encoder[3],
+                                                              kernel_size=config.kernel_size_encoder[3], padding='same',
                                                               activation='selu', name="DeConv4")
-        conv2d_trans_layer3 = tf.keras.layers.Conv2DTranspose(filters=config.filter_dimension_encoder[1], strides=[2, 2],
-                                                              kernel_size=[2, 2], padding='same',
+        conv2d_trans_layer3 = tf.keras.layers.Conv2DTranspose(filters=config.filter_dimension_encoder[1], strides=config.strides_encoder[2],
+                                                              kernel_size=config.kernel_size_encoder[2], padding='same',
                                                               activation='selu', output_padding=1)
-        conv2d_trans_layer2 = tf.keras.layers.Conv2DTranspose(filters=config.filter_dimension_encoder[0], strides=[2, 2],
-                                                              kernel_size=[3, 3], padding='same',
+        conv2d_trans_layer2 = tf.keras.layers.Conv2DTranspose(filters=config.filter_dimension_encoder[0], strides=config.strides_encoder[1],
+                                                              kernel_size=config.kernel_size_encoder[1], padding='same',
                                                               activation='selu', output_padding=0)
-        conv2d_trans_layer1 = tf.keras.layers.Conv2DTranspose(filters=config.dim_of_dataset, strides=[1, 1],
-                                                              kernel_size=[3, 3], padding='same',
+        conv2d_trans_layer1 = tf.keras.layers.Conv2DTranspose(filters=config.dim_of_dataset, strides=config.strides_encoder[0],
+                                                              kernel_size=config.kernel_size_encoder[0], padding='same',
                                                               activation='selu')
 
 

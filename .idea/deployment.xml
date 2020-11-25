@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
-  <component name="PublishConfigData" serverName="gpu" uploadOnCheckin="17162050-6b79-45cb-943f-2c9186b84690">
+  <component name="PublishConfigData" autoUpload="Always" serverName="gpu" uploadOnCheckin="17162050-6b79-45cb-943f-2c9186b84690">
     <serverData>
       <paths name="gpu">
         <serverdata>
@@ -11,5 +11,6 @@
       </paths>
     </serverData>
     <option name="myUploadOnCheckinName" value="gpu" />
+    <option name="myAutoUpload" value="ALWAYS" />
   </component>
 </project>

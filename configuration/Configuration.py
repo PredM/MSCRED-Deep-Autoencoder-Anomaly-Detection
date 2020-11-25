@@ -13,7 +13,7 @@ class Configuration:
         ###
         # General Configuration
         ###
-        self.curr_run_identifier = "model_5_2"
+        self.curr_run_identifier = "model_23"
         self.use_data_set_version = 3
         self.train_model = False
         self.test_model = True
@@ -30,42 +30,52 @@ class Configuration:
 
         self.use_loss_corr_rel_matrix = True   # MSCRED default: False, Reconstruction error is only based on correlations that are manually defined as relevant
         self.loss_use_batch_sim_siam = False    # MSCRED default: False,
-        self.use_corr_rel_matrix_for_input = False  # MSCRED default: False,  input contains only relevant correlations, others set to zero
-        self.use_corr_rel_matrix_for_input_replace_by_epsilon = False  # MSCRED default: False,  meaningful correlation that would be zero, are now near zero
+        self.use_corr_rel_matrix_for_input = True  # MSCRED default: False,  input contains only relevant correlations, others set to zero
+        self.use_corr_rel_matrix_for_input_replace_by_epsilon = True  # MSCRED default: False,  meaningful correlation that would be zero, are now near zero
 
         # NN parameter
         self.num_datastreams = 61
         self.batch_size = 128
-        self.dim_of_dataset = 18  # 1: 8 2: 17 3:18
-        self.epochs = 300
+        if self.use_data_set_version == 1:
+            self.dim_of_dataset = 8
+        elif self.use_data_set_version == 2:
+            self.dim_of_dataset = 17
+        elif self.use_data_set_version == 3:
+            self.dim_of_dataset = 18
+        #self.dim_of_dataset = 18  # 1: 8 2: 17 3:18
+        self.epochs = 1
         self.learning_rate = 0.001
         self.early_stopping_patience = 3
         self.split_train_test_ratio = 0.1
-        self.filter_dimension_encoder = [8, 16, 32, 64]  #[32, 64, 128, 256]  # [16, 32, 64, 128] #[32, 64, 128, 256] #[64, 128, 256, 512]
-        self.memory_size = 300
+        self.filter_dimension_encoder = [32, 64, 128, 256] # [16, 8, 4, 1] [64, 128, 256, 512]  #  # [16, 32, 64, 128] #[32, 64, 128, 256] #[64, 128, 256, 512]
+        self.strides_encoder = [1, 2, 2, 2]
+        self.kernel_size_encoder = [3, 3, 2, 2]
+        self.memory_size = 100
 
         ###
         # Test Evaluation
         ###
         self.use_corr_rel_matrix_in_eval = self.use_loss_corr_rel_matrix
-        self.threshold_selection_criterium = '99%'  # 'max', '99%' #[.25, .5, .75, 0.9, 0.95, 0.97, 0.99]
-        self.num_of_dim_over_threshold = 3  # normal: 0
-        self.num_of_dim_under_threshold = 20  # normal: 10 (higher as max. dim value) # 3: 20
+        self.threshold_selection_criterium = '90%'  # 'max', '99%' #[.25, .5, .75, 0.9, 0.95, 0.97, 0.99]
+        self.num_of_dim_over_threshold = 0  # normal: 0
+        self.num_of_dim_under_threshold = 20  # normal: 20 (higher as max. dim value) # 3: 20
+        self.num_of_dim_considered = self.dim_of_dataset # MSCRED: 1, only first dimension is used for anomaly detection
         self.print_att_dim_statistics = False
         self.generate_deep_encodings = False
         self.plot_heatmap_of_rec_error = False
-        self.remove_hard_to_detect_stuff = ['low_wear']
-        self.use_attribute_anomaly_as_condition = True                          # MSCRED default: True
+        self.remove_hard_to_detect_stuff = ['low_wear']                         # not implemented
+        self.use_attribute_anomaly_as_condition = False                          # MSCRED default: True
+        self.use_dim_for_anomaly_detection = range(14,self.dim_of_dataset)         # MSCRED default: range(1) // only first dimension 0, range(1,2): dim 1
         self.print_all_examples = True
 
         self.use_mass_evaulation = False
         # Mass evaluation parameters
         self.threshold_selection_criterium_list = ['99%', '99%', '99%', '99%', '97%', '97%', 'max', 'max', 'max', '90%', '97%', '97%']
-        self.num_of_dim_over_threshold_list = [1, 1, 3, 3, 3, 3, 1, 1, 1, 1, 1, 1]
+        self.num_of_dim_over_threshold_list = [1, 1, 3, 3, 3, 3, 1, 1, 3, 1, 1, 1]
         self.num_of_dim_under_threshold_list = [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20]
         self.use_corr_rel_matrix_in_eval_list = [False, True, False, True, False, True, False, True, True, True, False, True]
         self.use_attribute_anomaly_as_condition_list = [True, True, True, True, True, True, True, True, True, False, False, False]
-        self.print_pandas_statistics_for_validation = self.use_mass_evaulation
+        self.print_pandas_statistics_for_validation = False #self.use_mass_evaulation
 
         ###
         # Data Generation Configuration

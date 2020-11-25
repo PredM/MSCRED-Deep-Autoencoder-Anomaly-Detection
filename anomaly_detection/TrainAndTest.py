@@ -64,6 +64,7 @@ def calculateReconstructionError(real_input, reconstructed_input, plot_heatmaps,
     reconstruction_errors_perAttribute = np.zeros(
         (reconstructed_input.shape[0], reconstructed_input.shape[1] + reconstructed_input.shape[2], reconstructed_input.shape[3]))
     mse_per_example_over_all_dims = np.zeros((reconstructed_input.shape[0]))
+    mse_per_example_per_dims = np.zeros((reconstructed_input.shape[0],reconstructed_input.shape[3]))
 
     for i_example in range(reconstructed_input.shape[0]):  # Iterate over all examples
         for i_dim in range(reconstructed_input.shape[3]):  # Iterate over all "time-dimensions"
@@ -91,6 +92,7 @@ def calculateReconstructionError(real_input, reconstructed_input, plot_heatmaps,
             reconstruction_errors_perAttribute[i_example, :reconstructed_input.shape[1], i_dim] = mse_axis0
             reconstruction_errors_perAttribute[i_example, reconstructed_input.shape[1]:, i_dim] = mse_axis1
             mse_per_example_over_all_dims[i_example] = mse_per_example_over_all_dims[i_example] + mse
+            mse_per_example_per_dims[i_example, i_dim] = mse
             #print("example: ", i_example, "dim: ", i_dim, "Rec.Err.: ", diff_paper_formula, "MSE: ", mse)
             # print("axis0: ", mse_axis0)
             # print("axis0: ", mse_axis0.shape)
@@ -102,19 +104,19 @@ def calculateReconstructionError(real_input, reconstructed_input, plot_heatmaps,
     # Durch Anzahl an Dimensionen teilen
     mse_per_example_over_all_dims = mse_per_example_over_all_dims / reconstructed_input.shape[3]
 
-    return reconstruction_error_matrixes, reconstruction_errors_perAttribute, mse_per_example_over_all_dims
+    return reconstruction_error_matrixes, reconstruction_errors_perAttribute, mse_per_example_over_all_dims, mse_per_example_per_dims
 
 # This method compares threshold values with the reconstruction error and marks anomalous events
 # Returns
 # eval_results (#Examples, 2*attributes, dim) where each with 1 indicates an anomaly
 # eval_results_over_all_dimensions (#Examples, 2*attributes, 1) sums the number of dimensions with anomalies
 # eval_results_over_all_dimensions_for_each_example (#Examples, dim) sums the number of examples that have
-def calculateAnomalies(reconstructed_input, recon_err_perAttrib, thresholds, print_att_dim_statistics = True):
+def calculateAnomalies(reconstructed_input, recon_err_perAttrib, thresholds, print_att_dim_statistics = True, use_dim_for_anomaly_detection = 1):
     eval_results = np.zeros((reconstructed_input.shape[0], reconstructed_input.shape[1] + reconstructed_input.shape[2], reconstructed_input.shape[3]))
 
     for i_example in range(recon_err_perAttrib.shape[0]):
         rec_error_curr_example = recon_err_perAttrib[i_example, :, :]
-        for i_dim in range(reconstructed_input.shape[3]):
+        for i_dim in use_dim_for_anomaly_detection:
             # Compare reconstruction error if it exceeds threshold to detect an anomaly
             eval = rec_error_curr_example[:, i_dim] > thresholds[i_dim, :]
             eval_results[i_example, :, i_dim] = eval
@@ -141,7 +143,7 @@ def printEvaluation2(reconstructed_input, eval_results_over_all_dimensions, feat
     TP_F = TN_F = FP_F = FN_F = 0
 
     for example_idx in range(reconstructed_input.shape[0]):
-        # Adding 1 with the number of reconstruction errors over different dimension is reached, otherwise 0
+        # Adding 1 if the number of reconstruction errors over different dimension is reached, otherwise 0
         idx_with_Anomaly_1 = np.where(np.logical_and(
             num_of_dim_under_threshold > eval_results_over_all_dimensions[example_idx, :reconstructed_input.shape[1]],
             eval_results_over_all_dimensions[example_idx, :reconstructed_input.shape[1]] > num_of_dim_over_threshold))
@@ -215,19 +217,33 @@ def printEvaluation2(reconstructed_input, eval_results_over_all_dimensions, feat
         print("No_Failure TN: \t\t", TN_NF, "\t\tFailure TN: \t\t", TN_F)
         print("No_Failure FP: \t\t", FP_NF, "\t\tFailure FP: \t\t", FP_F)
         print("No_Failure FN: \t\t", FN_NF, "\t\tFailure FN: \t\t", FN_F)
-        prec_NF = TP_NF/(TP_NF+FP_NF)
-        rec_NF = TP_NF/(TP_NF+FN_NF)
-        acc_NF = (TP_NF+TN_NF)/(TP_NF+TN_NF+FP_NF+FN_NF)
-        f1_NF = 2*((prec_NF*rec_NF)/(prec_NF+rec_NF))
-        prec_F = TP_F / (TP_F + FP_F)
-        rec_F = TP_F / (TP_F + FN_F)
-        acc_F = (TP_F + TN_F) / (TP_F + TN_F + FP_F + FN_F)
-        f1_F = 2 * ((prec_F * rec_F) / (prec_F + rec_F))
+        prec_NF = TP_NF/(TP_NF+FP_NF+ tf.keras.backend.epsilon())
+        rec_NF = TP_NF/(TP_NF+FN_NF+ tf.keras.backend.epsilon())
+        acc_NF = (TP_NF+TN_NF)/(TP_NF+TN_NF+FP_NF+FN_NF+ tf.keras.backend.epsilon())
+        f1_NF = 2*((prec_NF*rec_NF)/(prec_NF+rec_NF+ tf.keras.backend.epsilon()))
+        prec_F = TP_F / (TP_F + FP_F+ tf.keras.backend.epsilon())
+        rec_F = TP_F / (TP_F + FN_F+ tf.keras.backend.epsilon())
+        acc_F = (TP_F + TN_F) / (TP_F + TN_F + FP_F + FN_F+ tf.keras.backend.epsilon())
+        f1_F = 2 * ((prec_F * rec_F) / (prec_F + rec_F+ tf.keras.backend.epsilon()))
         print("------------------------------------------------------------------------")
         print("No_Failure Acc: \t %.3f" % acc_NF, "\t\tFailure Acc: \t\t %.3f" % acc_F)
         print("No_Failure Precision: \t %.3f" % prec_NF, "\t\tFailure Precision: \t %.3f" % prec_F)
         print("No_Failure Recall: \t %.3f" %rec_NF, "\t\tFailure Recall: \t %.3f" % rec_F)
         print("No_Failure F1: \t \t %.3f" % f1_NF, "\t\tFailure F1:  \t\t %.3f" % f1_F)
+        print("------------------------------------------------------------------------")
+        TP_A = TP_NF+TP_F
+        TN_A = TN_NF+TN_F
+        FP_A = FP_NF+FP_F
+        FN_A = FN_NF+FN_F
+        prec_A = TP_A / (TP_A + FP_A+ tf.keras.backend.epsilon())
+        rec_A = TP_A / (TP_A + FN_A+ tf.keras.backend.epsilon())
+        acc_A = (TP_A + TN_A) / (TP_A + TN_A + FP_A + FN_A+ tf.keras.backend.epsilon())
+        f1_A = 2 * ((prec_A * rec_A) / (prec_A + rec_A+ tf.keras.backend.epsilon()))
+        print("------------------------------------------------------------------------")
+        print("OverAll Acc: \t\t %.3f" % acc_A)
+        print("OverAll Precision: \t %.3f" % prec_A)
+        print("OverAll Recall: \t %.3f" %rec_A)
+        print("OverAll F1: \t \t %.3f" % f1_A)
         print("------------------------------------------------------------------------")
 
 # Not used anymore
@@ -299,7 +315,7 @@ def plot_heatmap_of_reconstruction_error2(input, output, rec_error_matrix, id):
 def corr_rel_matrix_weighted_loss(corr_rel_mat):
     def loss(y_true, y_pred):
         loss = tf.square(y_true - y_pred)
-        print("loss dim: ", loss.shape)
+        print("corr_rel_matrix_weighted_loss loss dim: ", loss.shape)
         #if use_corr_rel_matrix:
         #loss = loss * corr_rel_mat
         loss = tf.reduce_sum(loss, axis=-1)
@@ -318,6 +334,7 @@ def mscred_loss_acc_paper(y_true, y_pred):
 
 def MseLoss(y_true, y_pred):
     loss = tf.square(y_true - y_pred)
+    print("MseLoss loss dim: ", loss.shape)
     #loss = np.square(np.linalg.norm((y_true - y_pred[0]), ord='fro'))
     #K.mean(math_ops.squared_difference(y_pred, y_true), axis=-1)
     loss = tf.reduce_mean(loss, axis=-1)
@@ -347,6 +364,7 @@ def SimLoss(y_true, y_pred):
     loss = tf.reduce_mean(loss, axis=-1)
     loss = loss / config.batch_size
     #loss = loss/128/(128*128)
+    print("SimLoss loss dim: ", loss.shape)
 
     return loss
 
@@ -356,6 +374,7 @@ def MemEntropyLoss(y_true, y_pred):
     mem_etrp = tf.reduce_sum((-y_pred) * tf.math.log(y_pred + 1e-12))
     #print("mem_etrp shape: ", mem_etrp.shape)
     loss = tf.reduce_mean(mem_etrp)
+    print("MemEntropyLoss loss dim: ", loss.shape)
     return loss
 
 def plot_training_process_history(history, curr_run_identifier):
@@ -445,6 +464,7 @@ def main():
     num_of_dim_under_threshold_list = config.num_of_dim_under_threshold_list
     use_corr_rel_matrix_in_eval_list = config.use_corr_rel_matrix_in_eval_list
     use_attribute_anomaly_as_condition_list = config.use_attribute_anomaly_as_condition_list
+    use_dim_for_anomaly_detection = config.use_dim_for_anomaly_detection
 
     print("### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ")
     print("curr_run_identifier: ", curr_run_identifier)
@@ -610,12 +630,12 @@ def main():
                 print("threshold_selection_criterium: ", threshold_selection_criterium, " with: ",num_of_dim_over_threshold,"/",num_of_dim_under_threshold, ". CorrMatrix: ", use_corr_rel_matrix_in_eval,"Anomaly based on Attributes: ", use_attribute_anomaly_as_condition)
 
                 ### Calcuation of reconstruction error on the validation data set ###
-                recon_err_matrixes_valid, recon_err_perAttrib_valid, mse_per_example_valid = calculateReconstructionError(
+                recon_err_matrixes_valid, recon_err_perAttrib_valid, mse_per_example_valid, mse_per_example_per_dims = calculateReconstructionError(
                     real_input=X_valid_y, reconstructed_input=X_valid_recon, plot_heatmaps=plot_heatmap_of_rec_error,
                     use_corr_rel_matrix=use_corr_rel_matrix_in_eval, corr_rel_matrix=np_corr_rel_matrix)
 
                 ### Calcuation of reconstruction error on the test data set ###
-                recon_err_matrixes_test, recon_err_perAttrib_test, mse_per_example_test = calculateReconstructionError(
+                recon_err_matrixes_test, recon_err_perAttrib_test, mse_per_example_test, mse_per_example_per_dims = calculateReconstructionError(
                     real_input=X_test_y, reconstructed_input=X_test_recon, plot_heatmaps=plot_heatmap_of_rec_error,
                     use_corr_rel_matrix=use_corr_rel_matrix_in_eval, corr_rel_matrix=np_corr_rel_matrix)
 
@@ -624,8 +644,8 @@ def main():
                                                                        threshold_selection_criterium=threshold_selection_criterium, mse_per_example=mse_per_example_valid, print_pandas_statistics_for_validation=print_pandas_statistics_for_validation)
 
                 # Evaluate
-                eval_results, eval_results_over_all_dimensions, eval_results_over_all_dimensions_for_each_example = calculateAnomalies(reconstructed_input=X_valid_recon, recon_err_perAttrib=recon_err_perAttrib_valid, thresholds=thresholds, print_att_dim_statistics = print_att_dim_statistics)
-                eval_results_f, eval_results_over_all_dimensions_f, eval_results_over_all_dimensions_for_each_example_f = calculateAnomalies(reconstructed_input=X_test_recon, recon_err_perAttrib=recon_err_perAttrib_test, thresholds=thresholds, print_att_dim_statistics = print_att_dim_statistics)
+                eval_results, eval_results_over_all_dimensions, eval_results_over_all_dimensions_for_each_example = calculateAnomalies(reconstructed_input=X_valid_recon, recon_err_perAttrib=recon_err_perAttrib_valid, thresholds=thresholds, print_att_dim_statistics = print_att_dim_statistics, use_dim_for_anomaly_detection=use_dim_for_anomaly_detection)
+                eval_results_f, eval_results_over_all_dimensions_f, eval_results_over_all_dimensions_for_each_example_f = calculateAnomalies(reconstructed_input=X_test_recon, recon_err_perAttrib=recon_err_perAttrib_test, thresholds=thresholds, print_att_dim_statistics = print_att_dim_statistics, use_dim_for_anomaly_detection=use_dim_for_anomaly_detection)
 
                 # Get Positions of anomalies
                 feature_names = np.load(feature_names_path)
@@ -643,12 +663,12 @@ def main():
                                  print_all_examples=print_all_examples)
         else:
             ### Calcuation of reconstruction error on the validation data set ###
-            recon_err_matrixes_valid, recon_err_perAttrib_valid, mse_per_example_valid = calculateReconstructionError(
+            recon_err_matrixes_valid, recon_err_perAttrib_valid, mse_per_example_valid, mse_per_example_per_dims = calculateReconstructionError(
                 real_input=X_valid_y, reconstructed_input=X_valid_recon, plot_heatmaps=plot_heatmap_of_rec_error,
                 use_corr_rel_matrix=use_corr_rel_matrix_in_eval, corr_rel_matrix=np_corr_rel_matrix)
 
             ### Calcuation of reconstruction error on the test data set ###
-            recon_err_matrixes_test, recon_err_perAttrib_test, mse_per_example_test = calculateReconstructionError(
+            recon_err_matrixes_test, recon_err_perAttrib_test, mse_per_example_test, mse_per_example_per_dims = calculateReconstructionError(
                 real_input=X_test_y, reconstructed_input=X_test_recon, plot_heatmaps=plot_heatmap_of_rec_error,
                 use_corr_rel_matrix=use_corr_rel_matrix_in_eval, corr_rel_matrix=np_corr_rel_matrix)
 
@@ -662,10 +682,10 @@ def main():
             # Evaluate
             eval_results, eval_results_over_all_dimensions, eval_results_over_all_dimensions_for_each_example = calculateAnomalies(
                 reconstructed_input=X_valid_recon, recon_err_perAttrib=recon_err_perAttrib_valid, thresholds=thresholds,
-                print_att_dim_statistics=print_att_dim_statistics)
+                print_att_dim_statistics=print_att_dim_statistics, use_dim_for_anomaly_detection=use_dim_for_anomaly_detection)
             eval_results_f, eval_results_over_all_dimensions_f, eval_results_over_all_dimensions_for_each_example_f = calculateAnomalies(
                 reconstructed_input=X_test_recon, recon_err_perAttrib=recon_err_perAttrib_test, thresholds=thresholds,
-                print_att_dim_statistics=print_att_dim_statistics)
+                print_att_dim_statistics=print_att_dim_statistics, use_dim_for_anomaly_detection=use_dim_for_anomaly_detection)
 
             # Get Positions of anomalies
             feature_names = np.load(feature_names_path)
