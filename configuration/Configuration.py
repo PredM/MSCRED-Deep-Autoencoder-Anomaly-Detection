@@ -14,8 +14,8 @@ class Configuration:
         # General Configuration
         ###
         self.curr_run_identifier = "model_23"
-        self.use_data_set_version = 3
-        self.train_model = False
+        self.use_data_set_version = 1
+        self.train_model = True
         self.test_model = True
 
         ###
@@ -28,10 +28,10 @@ class Configuration:
         self.use_convLSTM = True                # MSCRED default: True, Deaktivierung des ConvLSTM und Attention mittels False
         self.use_memory_restriction = False     # MSCRED default: False, Restricts the output only on previously seen examples
 
-        self.use_loss_corr_rel_matrix = True   # MSCRED default: False, Reconstruction error is only based on correlations that are manually defined as relevant
+        self.use_loss_corr_rel_matrix = False   # MSCRED default: False, Reconstruction error is only based on correlations that are manually defined as relevant
         self.loss_use_batch_sim_siam = False    # MSCRED default: False,
-        self.use_corr_rel_matrix_for_input = True  # MSCRED default: False,  input contains only relevant correlations, others set to zero
-        self.use_corr_rel_matrix_for_input_replace_by_epsilon = True  # MSCRED default: False,  meaningful correlation that would be zero, are now near zero
+        self.use_corr_rel_matrix_for_input = False  # MSCRED default: False,  input contains only relevant correlations, others set to zero
+        self.use_corr_rel_matrix_for_input_replace_by_epsilon = False  # MSCRED default: False,  meaningful correlation that would be zero, are now near zero
 
         # NN parameter
         self.num_datastreams = 61
@@ -43,12 +43,13 @@ class Configuration:
         elif self.use_data_set_version == 3:
             self.dim_of_dataset = 18
         #self.dim_of_dataset = 18  # 1: 8 2: 17 3:18
-        self.epochs = 1
+        self.epochs = 100
         self.learning_rate = 0.001
-        self.early_stopping_patience = 3
+        self.early_stopping_patience = 5
         self.split_train_test_ratio = 0.1
         self.filter_dimension_encoder = [32, 64, 128, 256] # [16, 8, 4, 1] [64, 128, 256, 512]  #  # [16, 32, 64, 128] #[32, 64, 128, 256] #[64, 128, 256, 512]
         self.strides_encoder = [1, 2, 2, 2]
+        self.output_dim = [8, 16, 31, 61]
         self.kernel_size_encoder = [3, 3, 2, 2]
         self.memory_size = 100
 
@@ -65,7 +66,7 @@ class Configuration:
         self.plot_heatmap_of_rec_error = False
         self.remove_hard_to_detect_stuff = ['low_wear']                         # not implemented
         self.use_attribute_anomaly_as_condition = False                          # MSCRED default: True
-        self.use_dim_for_anomaly_detection = range(14,self.dim_of_dataset)         # MSCRED default: range(1) // only first dimension 0, range(1,2): dim 1
+        self.use_dim_for_anomaly_detection = range(self.dim_of_dataset)         # MSCRED default: range(1) // only first dimension 0, range(1,2): dim 1
         self.print_all_examples = True
 
         self.use_mass_evaulation = False
@@ -84,9 +85,9 @@ class Configuration:
         self.step_max = 5
         # gap time between each segment in time steps
         # self.gap_time = 125 #10#
-        self.gap_time = 125
+        self.gap_time = 125 #3/1: 125
         # window size / length of each segment
-        # self.win_size = [125, 250, 375, 500, 625, 750, 875, 1000]  # [10, 30, 60]#
+        #1: self.win_size = [125, 250, 375, 500, 625, 750, 875, 1000]  # [10, 30, 60]#
         # self.win_size = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1250, 1500, 1750, 2000, 2500, 3000] #[10, 30, 60]#
         # self.win_size = [5, 10, 15, 20, 25, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130,140, 150, 175, 200, 225, 250,
         #                 275, 300, 325, 350, 375, 400, 425, 450, 475, 500, 550, 600, 650, 700, 750, 800, 850, 900, 950, 1000]
