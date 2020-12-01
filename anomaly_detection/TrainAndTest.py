@@ -23,11 +23,16 @@ print("Num GPUs Available: ", len(tf.config.experimental.list_physical_devices('
 # Load configuration
 config = Configuration()
 
+pd.set_option('display.max_rows', 500)
+pd.set_option('display.max_columns', 500)
+pd.set_option('display.width', 1000)
+
 # This method allows to compute thresholds on a hold-out validation data set that can be used for detecting anomalies on the test data set
 # Returns
 # thresholds: np matrix (dim, 2*attributes) with thresholds for each dimension and attribute (used in MSCRED-Framework)
 # mse_threshold: mse threshold value considering the full example
-def calculateThreshold(reconstructed_input, recon_err_perAttrib_valid, threshold_selection_criterium='99%', mse_per_example= None, print_pandas_statistics_for_validation=False):
+def calculateThreshold(reconstructed_input, recon_err_perAttrib_valid, threshold_selection_criterium='99%', mse_per_example=None, print_pandas_statistics_for_validation=False, feature_names=None):
+
     thresholds = np.zeros((reconstructed_input.shape[3], reconstructed_input.shape[1] + reconstructed_input.shape[2]))
     mse_threshold = None
     for i_dim in range(reconstructed_input.shape[3]):
@@ -37,7 +42,7 @@ def calculateThreshold(reconstructed_input, recon_err_perAttrib_valid, threshold
         # print("data_curr_dim shape: ", data_curr_dim.shape)
         df_curr_dim = pd.DataFrame(data_curr_dim)
         # print(df_curr_dim.head())
-        df_curr_dim_described = df_curr_dim.describe(percentiles=[.25, .5, .75, 0.9, 0.95, 0.97, 0.99])
+        df_curr_dim_described = df_curr_dim.describe(percentiles=[.25, .5, .75, 0.8, 0.9, 0.95, 0.97, 0.99])
         if print_pandas_statistics_for_validation:
             print("Statistics of dim: ", i_dim, " from healthy data of the validation data set: ")
             print(df_curr_dim_described)
@@ -45,10 +50,15 @@ def calculateThreshold(reconstructed_input, recon_err_perAttrib_valid, threshold
         # max = df_curr_dim_described.loc['max', :]
         # print("max: ", max)
         thresholds[i_dim, :] = df_curr_dim_described.loc[threshold_selection_criterium, :].values  # 97%
+        d1 = dict(zip(df_curr_dim_described.loc[threshold_selection_criterium, :].values, feature_names))
+        #print(i_dim, ": ", df_curr_dim_described.loc[threshold_selection_criterium, :].values)
+        #print("d1: ", d1)
+        #arr_index = np.where(feature_names == 'txt16_i4')
+        #print("INDEX txt16_i4: ", arr_index)
     # MSE threshold
     if mse_per_example is not None:
         df_mse = pd.DataFrame(mse_per_example)
-        df_mse_described = df_mse.describe(percentiles=[.25, .5, .75, 0.9, 0.95, 0.97, 0.99])
+        df_mse_described = df_mse.describe(percentiles=[.25, .5, .75, 0.8, 0.9, 0.95, 0.97, 0.99])
         if print_pandas_statistics_for_validation:
             print("Statistics for mse from healthy data of the validation data set: ")
             print(df_mse_described)
@@ -109,8 +119,8 @@ def calculateReconstructionError(real_input, reconstructed_input, plot_heatmaps,
 # This method compares threshold values with the reconstruction error and marks anomalous events
 # Returns
 # eval_results (#Examples, 2*attributes, dim) where each with 1 indicates an anomaly
-# eval_results_over_all_dimensions (#Examples, 2*attributes, 1) sums the number of dimensions with anomalies
-# eval_results_over_all_dimensions_for_each_example (#Examples, dim) sums the number of examples that have
+# eval_results_over_all_dimensions (#Examples, 2*attributes) sums the number of dimensions with anomalies
+# eval_results_over_all_dimensions_for_each_example (#Examples, dim) sums the number of anomalies per dimension
 def calculateAnomalies(reconstructed_input, recon_err_perAttrib, thresholds, print_att_dim_statistics = True, use_dim_for_anomaly_detection = 1):
     eval_results = np.zeros((reconstructed_input.shape[0], reconstructed_input.shape[1] + reconstructed_input.shape[2], reconstructed_input.shape[3]))
 
@@ -120,10 +130,20 @@ def calculateAnomalies(reconstructed_input, recon_err_perAttrib, thresholds, pri
             # Compare reconstruction error if it exceeds threshold to detect an anomaly
             eval = rec_error_curr_example[:, i_dim] > thresholds[i_dim, :]
             eval_results[i_example, :, i_dim] = eval
-
+            '''
+            # USED FOR DEBUGGING:
+            if i_example > recon_err_perAttrib.shape[0]-10:
+                d1 = dict(zip(rec_error_curr_example[:, i_dim], eval))
+                print(i_example," T- ",i_dim,": ", thresholds[i_dim, :])
+                print(i_example," R- ", i_dim, ": ", rec_error_curr_example[:, i_dim])
+                print(i_example," E- ", i_dim, ": ", d1)
+            '''
+    #print("eval_results shape: ", eval_results.shape)
     eval_results_over_all_dimensions = np.sum(eval_results, axis=2)
     eval_results_over_all_dimensions_for_each_example = np.sum(eval_results, axis=1)
     #print("eval_results_over_all_dimensions shape: ", eval_results_over_all_dimensions.shape)
+    #print("Last Example:")
+    #print(eval_results_over_all_dimensions[recon_err_perAttrib.shape[0]-1,:])
     #print("eval_results_over_all_dimensions_for_each_example shape: ", eval_results_over_all_dimensions_for_each_example.shape)
     if print_att_dim_statistics:
         for i_dim in range(reconstructed_input.shape[3]):
@@ -147,15 +167,23 @@ def printEvaluation2(reconstructed_input, eval_results_over_all_dimensions, feat
         idx_with_Anomaly_1 = np.where(np.logical_and(
             num_of_dim_under_threshold > eval_results_over_all_dimensions[example_idx, :reconstructed_input.shape[1]],
             eval_results_over_all_dimensions[example_idx, :reconstructed_input.shape[1]] > num_of_dim_over_threshold))
-        count_dim_anomalies_1 = eval_results_over_all_dimensions[example_idx, :reconstructed_input.shape[1]][
-            idx_with_Anomaly_1]
+        count_dim_anomalies_1 = eval_results_over_all_dimensions[example_idx, :reconstructed_input.shape[1]][idx_with_Anomaly_1]
         # print("eval_results_over_all_dimensions_f: ", eval_results_over_all_dimensions_f[example_idx,:pred.shape[1]])
         # idx_with_Anomaly_2 = np.where(eval_results_over_all_dimensions_f[example_idx,pred.shape[1]:] > num_of_dim_over_threshold)
         idx_with_Anomaly_2 = np.where(np.logical_and(
             num_of_dim_under_threshold > eval_results_over_all_dimensions[example_idx, reconstructed_input.shape[1]:],
             eval_results_over_all_dimensions[example_idx, reconstructed_input.shape[1]:] > num_of_dim_over_threshold))
-        count_dim_anomalies_2 = eval_results_over_all_dimensions[example_idx, reconstructed_input.shape[1]:][
-            idx_with_Anomaly_2]
+        count_dim_anomalies_2 = eval_results_over_all_dimensions[example_idx, reconstructed_input.shape[1]:][idx_with_Anomaly_2]
+
+        if example_idx == reconstructed_input.shape[0]-1:
+            print("count_dim_anomalies_1: ", count_dim_anomalies_1)
+            print("count_dim_anomalies_2: ", count_dim_anomalies_2)
+            print("idx_with_Anomaly_1: ", idx_with_Anomaly_1)
+            print("idx_with_Anomaly_2: ", idx_with_Anomaly_2)
+            print("feature_names 1: ",feature_names[idx_with_Anomaly_1])
+            print("feature_names 2: ", feature_names[idx_with_Anomaly_2])
+            print("eval_results_over_all_dimensions 1: ", eval_results_over_all_dimensions[example_idx, :reconstructed_input.shape[1]][23])
+            print("eval_results_over_all_dimensions 2: ", eval_results_over_all_dimensions[example_idx, reconstructed_input.shape[1]:][23])
 
         #Get ordered and combined dictonary of anomalous data streams
         anomalies_combined_asc_ordered = order_anomalies(count_dim_anomalies_1, count_dim_anomalies_2,idx_with_Anomaly_1, idx_with_Anomaly_2, feature_names)
@@ -405,22 +433,14 @@ def apply_corr_rel_matrix_on_input(use_corr_rel_matrix_for_input, use_corr_rel_m
     return input_data
 def order_anomalies(count_dim_anomalies_1, count_dim_anomalies_2,idx_with_Anomaly_1, idx_with_Anomaly_2, feature_names):
     # Combing anomalous attributes with its anomaly count in a dictonary
-    d1 = dict(zip(count_dim_anomalies_1, feature_names[idx_with_Anomaly_1]))
-    d2 = dict(zip(count_dim_anomalies_2, feature_names[idx_with_Anomaly_2]))
-
-    # Order dictionaries according number of anomouls occurences
-    od1 = dict(collections.OrderedDict(sorted(d1.items(), reverse=True)))
-    od2 = dict(collections.OrderedDict(sorted(d2.items(), reverse=True)))
-    # Switch key amd value which is necessary for merging both dicts
-    od1_flipped_dict = dict(zip(od1.values(), od1.keys()))
-    od2_flipped_dict = dict(zip(od2.values(), od2.keys()))
-    # Merging both dicts
-    merged_od1_od2 = dict(collections.Counter(od1_flipped_dict) + collections.Counter(od2_flipped_dict))
-    c_flipped_dict = dict(zip(merged_od1_od2.values(), merged_od1_od2.keys()))
-    # Switch key amd value again which is necessary for ordering
-    anomalies_combined_asc_ordered = dict(collections.OrderedDict(sorted(c_flipped_dict.items(), reverse=True)))
-    # Switch key amd value for better readability
-    anomalies_combined_asc_ordered_flipped_dict = dict(zip(anomalies_combined_asc_ordered.values(), anomalies_combined_asc_ordered.keys()))
+    d1 = dict(zip(feature_names[idx_with_Anomaly_1], count_dim_anomalies_1))
+    d2 = dict(zip(feature_names[idx_with_Anomaly_2], count_dim_anomalies_2))
+    #print("d1: ", d1)
+    #print("d2: ", d2)
+    merged_od1_od2 = dict(collections.Counter(d1) + collections.Counter(d2))
+    #print("merged_od1_od2: ", merged_od1_od2)
+    anomalies_combined_asc_ordered_flipped_dict = dict(sorted(merged_od1_od2.items(), key=lambda item: item[1], reverse=True))
+    #print("anomalies_combined_asc_ordered_flipped_dict: ", anomalies_combined_asc_ordered_flipped_dict)
     return anomalies_combined_asc_ordered_flipped_dict #dict(anomalies_combined_asc_ordered)
 
 def main():
@@ -494,7 +514,7 @@ def main():
 
     ### Create MSCRED model as TF graph
     print("config.relevant_features: ", config.relevant_features)
-    train_failure_labels_y = np.load(test_labels_y_path)
+    test_failure_labels_y = np.load(test_labels_y_path)
     ### Load Correlation Relevance Matrix ###
     df_corr_rel_matrix = pd.read_csv('../data/Attribute_Correlation_Relevance_Matrix_v0.csv', sep=';',index_col=0)
     np_corr_rel_matrix = df_corr_rel_matrix.values
@@ -616,6 +636,8 @@ def main():
             print("Encoded_output shape: ", encoded_output.shape)
             np.save('encoded_test.npy', encoded_output)
 
+        feature_names = np.load(feature_names_path)
+
         # Remove any dimension with size of 1
         X_valid_y = np.squeeze(X_valid_y)
         X_test_y = np.squeeze(X_test_y)
@@ -641,15 +663,15 @@ def main():
 
                 # Define Thresholds for each dimension and attribute
                 thresholds, mse_threshold = calculateThreshold(reconstructed_input=X_valid_recon,recon_err_perAttrib_valid=recon_err_perAttrib_valid,
-                                                                       threshold_selection_criterium=threshold_selection_criterium, mse_per_example=mse_per_example_valid, print_pandas_statistics_for_validation=print_pandas_statistics_for_validation)
+                                                                       threshold_selection_criterium=threshold_selection_criterium, mse_per_example=mse_per_example_valid,
+                                                               print_pandas_statistics_for_validation=print_pandas_statistics_for_validation, feature_names=feature_names)
 
                 # Evaluate
                 eval_results, eval_results_over_all_dimensions, eval_results_over_all_dimensions_for_each_example = calculateAnomalies(reconstructed_input=X_valid_recon, recon_err_perAttrib=recon_err_perAttrib_valid, thresholds=thresholds, print_att_dim_statistics = print_att_dim_statistics, use_dim_for_anomaly_detection=use_dim_for_anomaly_detection)
                 eval_results_f, eval_results_over_all_dimensions_f, eval_results_over_all_dimensions_for_each_example_f = calculateAnomalies(reconstructed_input=X_test_recon, recon_err_perAttrib=recon_err_perAttrib_test, thresholds=thresholds, print_att_dim_statistics = print_att_dim_statistics, use_dim_for_anomaly_detection=use_dim_for_anomaly_detection)
 
                 # Get Positions of anomalies
-                feature_names = np.load(feature_names_path)
-                #print("Feature Names Overview: ", feature_names)
+
 
                 print("#### Evaluate No-FAILURES / Validation data set #####")
                 printEvaluation2(reconstructed_input=X_valid_recon, eval_results_over_all_dimensions=eval_results_over_all_dimensions, feature_names=feature_names,
@@ -657,7 +679,7 @@ def main():
                                  mse_threshold=mse_threshold, mse_values=mse_per_example_valid, use_attribute_anomaly_as_condition=use_attribute_anomaly_as_condition,
                                  print_all_examples=print_all_examples)
                 print("#### Evaluate No-FAILURES and FAILURES / Test data set #####")
-                printEvaluation2(reconstructed_input=X_test_recon, eval_results_over_all_dimensions=eval_results_over_all_dimensions_f, feature_names=feature_names, labels = train_failure_labels_y,
+                printEvaluation2(reconstructed_input=X_test_recon, eval_results_over_all_dimensions=eval_results_over_all_dimensions_f, feature_names=feature_names, labels = test_failure_labels_y,
                                 num_of_dim_under_threshold=num_of_dim_under_threshold, num_of_dim_over_threshold=num_of_dim_over_threshold,
                                  mse_threshold=mse_threshold, mse_values=mse_per_example_test, use_attribute_anomaly_as_condition=use_attribute_anomaly_as_condition,
                                  print_all_examples=print_all_examples)
@@ -677,7 +699,8 @@ def main():
                                                            recon_err_perAttrib_valid=recon_err_perAttrib_valid,
                                                            threshold_selection_criterium=threshold_selection_criterium,
                                                            mse_per_example=mse_per_example_valid,
-                                                           print_pandas_statistics_for_validation=print_pandas_statistics_for_validation)
+                                                           print_pandas_statistics_for_validation=print_pandas_statistics_for_validation,
+                                                           feature_names=feature_names)
 
             # Evaluate
             eval_results, eval_results_over_all_dimensions, eval_results_over_all_dimensions_for_each_example = calculateAnomalies(
@@ -688,8 +711,6 @@ def main():
                 print_att_dim_statistics=print_att_dim_statistics, use_dim_for_anomaly_detection=use_dim_for_anomaly_detection)
 
             # Get Positions of anomalies
-            feature_names = np.load(feature_names_path)
-            # print("Feature Names Overview: ", feature_names)
 
             print("#### Evaluate No-FAILURES / Validation data set #####")
             printEvaluation2(reconstructed_input=X_valid_recon,
@@ -703,7 +724,7 @@ def main():
             print("#### Evaluate No-FAILURES and FAILURES / Test data set #####")
             printEvaluation2(reconstructed_input=X_test_recon,
                              eval_results_over_all_dimensions=eval_results_over_all_dimensions_f,
-                             feature_names=feature_names, labels=train_failure_labels_y,
+                             feature_names=feature_names, labels=test_failure_labels_y,
                              num_of_dim_under_threshold=num_of_dim_under_threshold,
                              num_of_dim_over_threshold=num_of_dim_over_threshold,
                              mse_threshold=mse_threshold, mse_values=mse_per_example_test,

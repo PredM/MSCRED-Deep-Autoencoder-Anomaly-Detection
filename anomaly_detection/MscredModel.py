@@ -27,7 +27,9 @@ class MSCRED(tf.keras.Model):
 
         if guassian_noise_stddev is not None:
             adding_noise = tf.keras.layers.GaussianNoise(stddev=guassian_noise_stddev)
-            signatureMatrixInput_ = adding_noise(signatureMatrixInput)
+            adding_noise_dropout = tf.keras.layers.Dropout(guassian_noise_stddev)
+            a = adding_noise(signatureMatrixInput)
+            signatureMatrixInput_ = adding_noise_dropout(a)
         else:
             signatureMatrixInput_ = signatureMatrixInput
 
@@ -44,15 +46,15 @@ class MSCRED(tf.keras.Model):
         conv2d_layer4 = tf.keras.layers.Conv2D(filters=config.filter_dimension_encoder[3], strides=config.strides_encoder[3], kernel_size=config.kernel_size_encoder[3],
                                                padding='same',
                                                activation='selu')
-        convLISTM_layer1 = tf.keras.layers.ConvLSTM2D(filters=config.filter_dimension_encoder[0], strides=1, kernel_size=[2, 2], padding='same',
+        convLISTM_layer1 = tf.keras.layers.ConvLSTM2D(filters=config.filter_dimension_encoder[0], strides=1, kernel_size=config.kernel_size_encoder[0], padding='same',
                                                       return_sequences=use_attention, name="ConvLSTM1")
-        convLISTM_layer2 = tf.keras.layers.ConvLSTM2D(filters=config.filter_dimension_encoder[1], strides=1, kernel_size=[2, 2], padding='same',
+        convLISTM_layer2 = tf.keras.layers.ConvLSTM2D(filters=config.filter_dimension_encoder[1], strides=1, kernel_size=config.kernel_size_encoder[1], padding='same',
                                                       return_sequences=use_attention, name="ConvLSTM2")
 
-        convLISTM_layer3 = tf.keras.layers.ConvLSTM2D(filters=config.filter_dimension_encoder[2], strides=1, kernel_size=[2, 2], padding='same',
+        convLISTM_layer3 = tf.keras.layers.ConvLSTM2D(filters=config.filter_dimension_encoder[2], strides=1, kernel_size=config.kernel_size_encoder[2], padding='same',
                                                       return_sequences=use_attention, name="ConvLSTM3")
 
-        convLISTM_layer4 = tf.keras.layers.ConvLSTM2D(filters=config.filter_dimension_encoder[3], strides=1, kernel_size=[2, 2], padding='same',
+        convLISTM_layer4 = tf.keras.layers.ConvLSTM2D(filters=config.filter_dimension_encoder[3], strides=1, kernel_size=config.kernel_size_encoder[3], padding='same',
                                                       return_sequences=use_attention, name="ConvLSTM4")
 
         conv2d_trans_layer4 = tf.keras.layers.Conv2DTranspose(filters=config.filter_dimension_encoder[2], strides=config.strides_encoder[3],
