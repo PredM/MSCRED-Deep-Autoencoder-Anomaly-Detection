@@ -37,6 +37,10 @@ def generate_signature_matrix_node(run, numOfRun):
     data = np.transpose(data)
     max_win_size = max(win_size)
     print("max_win_size: ", max_win_size)
+    # Replace zeros with epsilon (value near zero)
+    if config.replace_zeros_with_epsilion_in_matrix_generation:
+        data = np.where(data == 0, np.finfo(np.float32).eps, data)
+
     # multi-scale signature matrix generation for every window size of each segment
     for w in range(len(win_size)):
         matrix_all = []
@@ -56,7 +60,8 @@ def generate_signature_matrix_node(run, numOfRun):
                         matrix_t[i][j] = np.inner(data[i, t - win:t], data[j, t - win:t]) / (win)  # rescale by win
                         matrix_t[j][i] = matrix_t[i][j]
             matrix_all.append(matrix_t)
-        matrix_data_path = config.directoryname_matrix_data
+        #matrix_data_path = config.directoryname_matrix_data + "train_Failure/"
+        matrix_data_path = config.path + config.directoryname_matrix_data + "_epsi_train_Failure/"
         if not os.path.exists(matrix_data_path):
             os.makedirs(matrix_data_path)
         np.save(matrix_data_path + config.filename_matrix_data + str(win)+"_"+str(numOfRun), matrix_all)
@@ -68,7 +73,7 @@ def generate_signature_matrix_node(run, numOfRun):
 def main():
 
     # Import runs
-    npzfile = np.load("../data/Failure_Train_runs.npz", allow_pickle=True)
+    npzfile = np.load(config.path+"Failure_Train_runs.npz", allow_pickle=True)
     #print("npzfile: ", npzfile.files)
     noFailureRuns = npzfile['arr_0']
     print("FailureRuns shape: ", noFailureRuns.shape)

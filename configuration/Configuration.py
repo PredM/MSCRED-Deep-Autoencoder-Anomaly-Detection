@@ -13,9 +13,9 @@ class Configuration:
         ###
         # General Configuration
         ###
-        self.curr_run_identifier = "model_34"
+        self.curr_run_identifier = "model_48"
         self.use_data_set_version = 1
-        self.train_model = False
+        self.train_model = True
         self.test_model = True
 
         ###
@@ -23,12 +23,13 @@ class Configuration:
         ###
         # Variants of the MSCRED
         self.guassian_noise_stddev = None       # MSCRED default: None, None für nichts oder Wert: 0.1 / denoising autoencoder (Dropout zusätzlich ergänzt)
+        self.l1Reg = 0.0                       # MSCRED default: 0.0 , recommended: 0.001
         self.use_attention = True               # MSCRED default: True, Deaktivierung der Attention, erfordert ConvLSTM
         self.keras_attention_layer_instead_of_own_impl = True  # MSCRED default: False, ansonsten andere Attention als im peper beschrieben
         self.use_convLSTM = True                # MSCRED default: True, Deaktivierung des ConvLSTM und Attention mittels False
         self.use_memory_restriction = True     # MSCRED default: False, Restricts the output only on previously seen examples
 
-        self.use_loss_corr_rel_matrix = True   # MSCRED default: False, Reconstruction error is only based on correlations that are manually defined as relevant
+        self.use_loss_corr_rel_matrix = False   # MSCRED default: False, Reconstruction error is only based on correlations that are manually defined as relevant
         self.loss_use_batch_sim_siam = False    # MSCRED default: False,
         self.use_corr_rel_matrix_for_input = False  # MSCRED default: False,  input contains only relevant correlations, others set to zero
         self.use_corr_rel_matrix_for_input_replace_by_epsilon = False  # MSCRED default: False,  meaningful correlation that would be zero, are now near zero
@@ -42,16 +43,30 @@ class Configuration:
             self.dim_of_dataset = 17
         elif self.use_data_set_version == 3:
             self.dim_of_dataset = 18
+        elif self.use_data_set_version == 4:
+            self.dim_of_dataset = 4
+        elif self.use_data_set_version == 5:
+            self.dim_of_dataset = 4
         #self.dim_of_dataset = 18  # 1: 8 2: 17 3:18
         self.epochs = 100
         self.learning_rate = 0.001
         self.early_stopping_patience = 5
         self.split_train_test_ratio = 0.1
-        self.filter_dimension_encoder = [32, 64, 128, 256] # [16, 8, 4, 1] [64, 128, 256, 512]  #  # [16, 32, 64, 128] #[32, 64, 128, 256] #[64, 128, 256, 512]
-        self.strides_encoder = [1, 2, 2, 2]
-        self.output_dim = [8, 16, 31, 61]
-        self.kernel_size_encoder = [3, 3, 2, 2]
-        self.memory_size = 300
+        self.use_strides = True
+
+        if self.use_strides == True:
+            self.strides_encoder = [1, 2, 2, 2] #[1, 2, 2, 2]
+            self.dilation_encoder = [1, 1, 1, 1]
+            self.output_dim = [8, 16, 31, 61]   #dependent on strides
+            self.filter_dimension_encoder = [32, 64, 128, 256] #[32, 16, 8, 4] # [64, 32, 16, 8] # [32, 64, 128, 256]#[32, 64, 128, 256]  # [16, 8, 4, 1] [64, 128, 256, 512]  #  # [16, 32, 64, 128] #[32, 64, 128, 256] #[64, 128, 256, 512]
+        else:
+            self.dilation_encoder = [1, 2, 2, 2]
+            self.strides_encoder = [1, 1, 1, 1]
+            self.output_dim = [61, 61, 61, 61]
+            self.filter_dimension_encoder = [16, 8, 4, 1]
+
+        self.kernel_size_encoder = [3, 3, 2, 2] #[3, 3, 2, 2]
+        self.memory_size = 100
 
         ###
         # Test Evaluation
@@ -69,7 +84,7 @@ class Configuration:
         self.use_attribute_anomaly_as_condition = False                          # MSCRED default: True
         self.print_all_examples = True
 
-        self.use_mass_evaulation = False
+        self.use_mass_evaulation = True
         # Mass evaluation parameters
         self.threshold_selection_criterium_list = ['99%', '99%', '99%', '99%', '97%', '97%', 'max', 'max', 'max', '90%', '90%', '97%', '97%']
         self.num_of_dim_over_threshold_list = [1, 1, 3, 3, 3, 3, 1, 1, 3, 1, 1, 1, 1]
@@ -97,6 +112,7 @@ class Configuration:
         self.filename_matrix_data = "matrix_win_"
         self.step_size_reconstruction = 1
         self.directoryname_matrix_data = "matrix_data_4"
+        self.replace_zeros_with_epsilion_in_matrix_generation = True
 
         ###
         # Data Set Configuration
@@ -124,6 +140,20 @@ class Configuration:
             self.test_labels_y_path = path + "training_data_set_3_failure_labels.npy"
             self.test_matrix_path = path + "test_data_set_3.npy"
             self.test_labels_y_path = path + "test_data_set_3_failure_labels.npy"
+        elif self.use_data_set_version == 4:
+            self.training_data_set_path = path + "training_data_set_4_trainWoFailure.npy"
+            self.valid_split_save_path = path + "training_data_set_4_test_split.npy"
+            self.test_matrix_path = path + "training_data_set_4_trainWFailure.npy"
+            self.test_labels_y_path = path + "training_data_set_4_failure_labels.npy"
+            self.test_matrix_path = path + "test_data_set_4.npy"
+            self.test_labels_y_path = path + "test_data_set_4_failure_labels.npy"
+        elif self.use_data_set_version == 5:
+            self.training_data_set_path = path + "training_data_set_4_epsi_trainWoFailure.npy"
+            self.valid_split_save_path = path + "training_data_set_4_epsi_test_split.npy"
+            self.test_matrix_path = path + "training_data_set_4_epsi_trainWFailure.npy"
+            self.test_labels_y_path = path + "training_data_set_4_failure_labels.npy"
+            self.test_matrix_path = path + "test_data_set_4_epsi.npy"
+            self.test_labels_y_path = path + "test_data_set_4_failure_labels.npy"
 
         self.feature_names_path = "../data/feature_names.npy"
 

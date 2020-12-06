@@ -27,7 +27,7 @@ class MSCRED(tf.keras.Model):
 
         if guassian_noise_stddev is not None:
             adding_noise = tf.keras.layers.GaussianNoise(stddev=guassian_noise_stddev)
-            adding_noise_dropout = tf.keras.layers.Dropout(guassian_noise_stddev)
+            adding_noise_dropout = tf.keras.layers.SpatialDropout3D(guassian_noise_stddev)
             a = adding_noise(signatureMatrixInput)
             signatureMatrixInput_ = adding_noise_dropout(a)
         else:
@@ -35,16 +35,16 @@ class MSCRED(tf.keras.Model):
 
 
         conv2d_layer1 = tf.keras.layers.Conv2D(filters=config.filter_dimension_encoder[0], strides=config.strides_encoder[0], kernel_size=config.kernel_size_encoder[0],
-                                               padding='same',
+                                               padding='same', activity_regularizer=tf.keras.regularizers.l1(config.l1Reg), dilation_rate=config.dilation_encoder[0],
                                                activation='selu')
         conv2d_layer2 = tf.keras.layers.Conv2D(filters=config.filter_dimension_encoder[1], strides=config.strides_encoder[1], kernel_size=config.kernel_size_encoder[1],
-                                               padding='same',
+                                               padding='same', activity_regularizer=tf.keras.regularizers.l1(config.l1Reg), dilation_rate=config.dilation_encoder[1],
                                                activation='selu')
         conv2d_layer3 = tf.keras.layers.Conv2D(filters=config.filter_dimension_encoder[2], strides=config.strides_encoder[2], kernel_size=config.kernel_size_encoder[2],
-                                               padding='same',
+                                               padding='same', activity_regularizer=tf.keras.regularizers.l1(config.l1Reg), dilation_rate=config.dilation_encoder[2],
                                                activation='selu')
         conv2d_layer4 = tf.keras.layers.Conv2D(filters=config.filter_dimension_encoder[3], strides=config.strides_encoder[3], kernel_size=config.kernel_size_encoder[3],
-                                               padding='same',
+                                               padding='same', activity_regularizer=tf.keras.regularizers.l1(config.l1Reg), dilation_rate=config.dilation_encoder[3],
                                                activation='selu')
         convLISTM_layer1 = tf.keras.layers.ConvLSTM2D(filters=config.filter_dimension_encoder[0], strides=1, kernel_size=config.kernel_size_encoder[0], padding='same',
                                                       return_sequences=use_attention, name="ConvLSTM1")
@@ -307,8 +307,7 @@ class Memory(tf.keras.layers.Layer):
         self.memory_storage = self.add_weight(name='memoryStorage',
                                               #shape=(100,16384),
                                               shape=(self.memory_size,self.input_size),
-                                              initializer=tf.keras.initializers.RandomNormal(mean=0, stddev=0.05,
-                                                                                             seed=42),
+                                              initializer=tf.initializers.glorot_normal(),
                                               trainable=True)
         super(Memory, self).build(input_shape)
 
@@ -319,23 +318,43 @@ class Memory(tf.keras.layers.Layer):
 
         return w
     def call(self, input_):
+        #tf.print("Memory Input shape: ", tf.shape(input_))
         num = tf.linalg.matmul(input_, tf.transpose(self.memory_storage), name='attention_num')
         denom = tf.linalg.matmul(input_ ** 2, tf.transpose(self.memory_storage) ** 2, name='attention_denum')
-
+        
         w = (num + 1e-12) / (denom + 1e-12)
+        '''
+        #adding_noise = tf.keras.layers.GaussianNoise(stddev=0.3)
+        adding_noise = tf.keras.layers.Dropout(rate=0.1)
+        w = adding_noise(w)
+        #values, indices = tf.math.top_k(w, 2)
+        '''
         attentiton_w = tf.nn.softmax(w) # Eq.4
+
         #tf.print("attentiton_w: ", attentiton_w)
+        #tf.print(tf.shape(attentiton_w))
+        '''
+        max_idx = tf.math.argmax(
+            attentiton_w, axis=1, output_type=tf.dtypes.int64, name=None
+        )
+        tf.print("max_idx: ", max_idx,"shape:",tf.shape(max_idx), "Value: ", tf.reduce_max(attentiton_w, axis=1))
+        '''
         # Hard Shrinkage for Sparse Addressing
         lam = 1 / self.memory_size
         addr_num = tf.keras.activations.relu(attentiton_w - lam) * attentiton_w
+        #tf.print("addr_num: ", addr_num)
         addr_denum = tf.abs(attentiton_w - lam) + 1e-12
+        #tf.print("addr_denum: ", addr_denum)
         memory_addr = addr_num / addr_denum # Eq. 7
+        #tf.print("memory_addr: ", memory_addr)
 
         # Set any values less 1e-12 or above  1-(1e-12) to these values
         w_hat = tf.clip_by_value(memory_addr, 1e-12, 1-(1e-12))
         #w_hat = memory_addr / tf.linalg.normalize(memory_addr,ord=1,axis=0) # written in text after Eq. 7
         # Eq. 3:
         z_hat = tf.linalg.matmul(w_hat, self.memory_storage)
+        #adding_noise = tf.keras.layers.Dropout(rate=0.1)
+        #z_hat = adding_noise(z_hat)
         #
         #print("z_hat shape ", z_hat.shape)
 

@@ -31,7 +31,8 @@ def main():
     config = Configuration()
     print("Start to import ", num_of_run_to_import)
     #full_data_set = importSignatureMatrix2('../data/matrix_data/')
-    full_data_set = importSignatureMatrix2('../data/matrix_data_3_train_Failure/')
+    # config.path + config.directoryname_matrix_data + "_epsi_train_Failure/"
+    full_data_set = importSignatureMatrix2(config.path + config.directoryname_matrix_data + "_epsi_train_Failure/")
     with open('../data/runFailureLabels.txt', 'rb') as f:
         labels = [x.decode('utf8').strip() for x in f.readlines()]
     labels_new = []
@@ -69,10 +70,10 @@ def main():
         #print("curr_xTrainData shape: ", curr_xTrainData.shape)
         #print("Labels new shape: ", len(labels_new))
 
-    np.save('training_data_set_3_trainWFailure.npy', curr_xTrainData)
+    np.save(config.path +'training_data_set_4_epsi_trainWFailure.npy', curr_xTrainData)
     labels_new_arr = np.asarray(labels_new)
     print("labels_new_arr: ",labels_new_arr)
-    np.save('training_data_set_3_failure_labels.npy', labels_new_arr)
+    np.save(config.path +'training_data_set_4_epsi_failure_labels.npy', labels_new_arr)
 
     print("Final Data Set generation finished!")
 

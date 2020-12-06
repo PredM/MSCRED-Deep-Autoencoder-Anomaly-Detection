@@ -10,6 +10,8 @@ from MscredModel import MSCRED
 from MscredModel import Memory
 #from mscred import MemoryInstanceBased
 from configuration.Configuration import Configuration
+from sklearn.metrics import roc_auc_score
+from sklearn import metrics
 
 
 # TF and background relevant settings
@@ -50,11 +52,11 @@ def calculateThreshold(reconstructed_input, recon_err_perAttrib_valid, threshold
         # max = df_curr_dim_described.loc['max', :]
         # print("max: ", max)
         thresholds[i_dim, :] = df_curr_dim_described.loc[threshold_selection_criterium, :].values  # 97%
-        d1 = dict(zip(df_curr_dim_described.loc[threshold_selection_criterium, :].values, feature_names))
-        #print(i_dim, ": ", df_curr_dim_described.loc[threshold_selection_criterium, :].values)
-        #print("d1: ", d1)
-        #arr_index = np.where(feature_names == 'txt16_i4')
-        #print("INDEX txt16_i4: ", arr_index)
+        # d1 = dict(zip(df_curr_dim_described.loc[threshold_selection_criterium, :].values, feature_names))
+        # print(i_dim, ": ", df_curr_dim_described.loc[threshold_selection_criterium, :].values)
+        # print("d1: ", d1)
+        # arr_index = np.where(feature_names == 'txt16_i4')
+        # print("INDEX txt16_i4: ", arr_index)
     # MSE threshold
     if mse_per_example is not None:
         df_mse = pd.DataFrame(mse_per_example)
@@ -402,7 +404,16 @@ def MemEntropyLoss(y_true, y_pred):
     mem_etrp = tf.reduce_sum((-y_pred) * tf.math.log(y_pred + 1e-12))
     #print("mem_etrp shape: ", mem_etrp.shape)
     loss = tf.reduce_mean(mem_etrp)
+    '''
+    mem_etrp_2 = tf.reduce_mean(y_pred, 0)
+    print("MemEntropyLoss mem_etrp_2 dim: ", mem_etrp_2.shape)
+    mem_etrp_2 = tf.reduce_sum((-mem_etrp_2) * tf.math.log(mem_etrp_2 + 1e-12))
+    mem_etrp_2 = 5 - mem_etrp_2
+    tf.print("mem_etrp_2:", mem_etrp_2)
+    mem_etrp_2 = tf.reduce_mean(y_pred)
+    print("MemEntropyLoss mem_etrp_2 dim: ", mem_etrp_2.shape)
     print("MemEntropyLoss loss dim: ", loss.shape)
+    '''
     return loss
 
 def plot_training_process_history(history, curr_run_identifier):
@@ -572,7 +583,7 @@ def main():
                                      loss_weights=[0.9998, 0.0002])
             else:
                 model_MSCRED.compile(optimizer=opt, loss=[MseLoss, MemEntropyLoss],
-                                     loss_weights=[0.9998, 0.0002])
+                                     loss_weights=[0.999998, 0.000002])
         elif use_loss_corr_rel_matrix:
             model_MSCRED.compile(optimizer=opt, loss=corr_rel_matrix_weighted_loss(corr_rel_mat=np_corr_rel_matrix))
         elif loss_use_batch_sim_siam:
@@ -621,7 +632,9 @@ def main():
             X_valid_recon = model_MSCRED.predict(X_valid, batch_size=128)
         print("Reconstruction of validation data set done with shape :", X_valid_recon.shape) #((9, 61, 61, 3))
         if loss_use_batch_sim_siam or use_memory_restriction:
-            X_test_recon = model_MSCRED.predict(X_test, batch_size=128)[0]
+            output = model_MSCRED.predict(X_test, batch_size=128)
+            X_test_recon = output[0]
+            X_test_memAccess = output[1]
         else:
             X_test_recon = model_MSCRED.predict(X_test, batch_size=128)
         print("Reconstruction of test data set done with shape :", X_test_recon.shape)  # ((9, 61, 61, 3))
@@ -731,6 +744,57 @@ def main():
                              use_attribute_anomaly_as_condition=use_attribute_anomaly_as_condition,
                              print_all_examples=print_all_examples)
 
+        # ROC-AUC
+        y_true = pd.factorize(test_failure_labels_y)[0].tolist()
+        y_true = np.where(np.asarray(y_true) > 1, 1,0)
+        print("y_true: ", y_true)
+        print("y_true: ", y_true.shape)
+        print("mse_per_example_test:", mse_per_example_test.shape)
+        mse_per_example_test_normalized = (mse_per_example_test - np.min(mse_per_example_test)) / np.ptp(mse_per_example_test)
+        score = roc_auc_score(y_true, mse_per_example_test_normalized)
+        print("Roc-Auc_Score: ", score)
+        fpr, tpr, thresholds = metrics.roc_curve(y_true, mse_per_example_test_normalized)
+        #print("fpr: ", fpr)
+        #print("tpr: ", tpr)
+        #print("thresholds: ", thresholds)
+        if use_memory_restriction:
+            print("X_test_memAccess shape: ", X_test_memAccess)
+            print("X_test_memAccess shape: ", X_test_memAccess.shape)
+            maxInRowsIndex = X_test_memAccess.argmax(axis=1)
+            maxInRowsValue = np.amax(X_test_memAccess, axis=1)
+            print("max index:", maxInRowsIndex)
+            print("max value:", maxInRowsValue)
+
+            split = np.split(X_test_memAccess, 100, axis=1)
+            maxInRowsIndex = split[0].argmax(axis=1)
+            maxInRowsValue = np.amax(split[0], axis=1)
+            print("max index 0:", maxInRowsIndex)
+            print("max value 0:", maxInRowsValue)
+            maxInRowsIndex = split[3].argmax(axis=1)
+            maxInRowsValue = np.amax(split[3], axis=1)
+            print("max index 3:", maxInRowsIndex)
+            print("max value 3:", maxInRowsValue)
+
+            np.set_printoptions(threshold=sys.maxsize)
+            print("X_test_memAccess[0,:]", X_test_memAccess[0,:])
+            print("X_test_memAccess[100,:]", X_test_memAccess[100, :])
+            print("X_test_memAccess[300,:]", X_test_memAccess[300, :])
+            print("X_test_memAccess[500,:]", X_test_memAccess[500, :])
+
+
+        #plot
+        plt.figure()
+        lw=2
+        plt.plot(fpr, tpr, color='darkorange',
+                 lw=lw, label='ROC curve (area = %0.2f)' % score)
+        plt.plot([0, 1], [0, 1], color='navy', lw=lw, linestyle='--')
+        plt.xlim([0.0, 1.0])
+        plt.ylim([0.0, 1.05])
+        plt.xlabel('False Positive Rate')
+        plt.ylabel('True Positive Rate')
+        plt.title('Receiver operating characteristic example')
+        plt.legend(loc="lower right")
+        plt.savefig('ROC_Curve_' + curr_run_identifier + '.png')
 
 if __name__ == '__main__':
     main()
