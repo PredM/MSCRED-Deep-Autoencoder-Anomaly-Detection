@@ -44,7 +44,7 @@ def main():
     curr_xTrainData = np.zeros((1, s, full_data_set[0].shape[1], full_data_set[0].shape[2], full_data_set[0].shape[3]))
     for run in range(num_of_run_to_import):
         curr_run = full_data_set[run]
-        print("run: ", run)
+        print("run: ", run,"curr_run.shape[0]-s:",curr_run.shape[0]-s,"curr_run.shape:",curr_run.shape)
         for i in range(curr_run.shape[0]-s):  # num_of_examples - s
             if run == i:
                 curr_example = curr_run[i:i + s, :, :, :]
@@ -70,10 +70,10 @@ def main():
         #print("curr_xTrainData shape: ", curr_xTrainData.shape)
         #print("Labels new shape: ", len(labels_new))
 
-    np.save(config.path +'test_data_set_4_epsi.npy', curr_xTrainData)
+    np.save(config.path +'test_data_set_5_epsi.npy', curr_xTrainData)
     labels_new_arr = np.asarray(labels_new)
     print("labels_test_new_arr: ",labels_new_arr)
-    np.save(config.path +'test_data_set_4_epsi_failure_labels.npy', labels_new_arr)
+    np.save(config.path +'test_data_set_5_epsi_failure_labels.npy', labels_new_arr)
 
     print("Final Data Set generation finished!")
 

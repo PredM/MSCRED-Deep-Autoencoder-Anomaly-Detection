@@ -8,14 +8,20 @@ import numpy as np
 import collections
 from MscredModel import MSCRED
 from MscredModel import Memory
+from MscredModel import Memory2
+from MscredModel import MSGCRED
 #from mscred import MemoryInstanceBased
 from configuration.Configuration import Configuration
-from sklearn.metrics import roc_auc_score
+from sklearn.metrics import roc_auc_score, precision_recall_curve, average_precision_score, auc
 from sklearn import metrics
-
+from sklearn.metrics import classification_report
+from sklearn.metrics import precision_recall_fscore_support
+from sklearn.metrics import confusion_matrix
+from sklearn import preprocessing
 
 # TF and background relevant settings
 #tf.disable_v2_behavior()
+
 # import logging
 sys.path.append(os.path.abspath(os.path.join(os.getcwd(), os.pardir)))
 # run able server
@@ -69,8 +75,678 @@ def calculateThreshold(reconstructed_input, recon_err_perAttrib_valid, threshold
 
     return thresholds, mse_threshold
 
+def calculateThresholdWithLabelsAsMSCRED(residual_matrix, labels_valid, residual_matrix_test, residual_matrix_wo_FaF=None, attr_names=None):
+    # Treshold calculation
+
+    # Determine threshold θ empirically  Paper only states the following: (" ... the number of elements whose value is
+    # larger than a given threshold θ in the residual signature matrices and θ is detemined empirically over different
+    # datasets." (p. 1413)
+    # Idea: iterate over all residual values of the validation set and then use the threshold with the highest ROC-AUC
+    # since to optimize the anomaly score s(t) w.r.t. to an f1-score (p. 1414) labeled data is needed anyway
+
+    ### Supervised
+    # 381/61/61/
+    highest_roc_auc_attri_dims_count_w = 0
+    highest_dict = {}
+    num_examples = residual_matrix.shape[0]
+    num_data_streams = residual_matrix.shape[1]
+    anomaly_score_per_example_w_highest_roc_auc = np.zeros((num_examples))
+    y_true = np.where(labels_valid == 'no_failure', 0, 1)
+    for dimension in range(residual_matrix.shape[3]):
+        data_curr_dim = residual_matrix[:, :, :, dimension]
+        # Reshape to (examples, residual elements) --> (381,61*61)
+        data_curr_dim =np.reshape(data_curr_dim,(num_examples, num_data_streams * num_data_streams))
+        #Normalize the data
+        #scaler = scaler_dict[dimension]
+        #data_curr_dim = scaler.transform(data_curr_dim)
+        # Iterate over all occured residual values, using every 1000th entry
+        for curr_threshold in np.sort(data_curr_dim.flatten()[0::1000]):
+            # Define broken elements for every example:
+            anomaly_score_per_example = np.zeros((num_examples))
+            for example_idx in range(num_examples):
+                res_mat_example = data_curr_dim[example_idx,:]
+                num_over_thrshld = len(res_mat_example[res_mat_example > curr_threshold])
+                anomaly_score_per_example[example_idx] = num_over_thrshld
+            # All data collected for current threshold ... do some evaluation with roc auc
+            roc_auc_attri_dims_count_w, roc_auc_attri_dims_count_m = calculate_RocAuc(labels_valid, anomaly_score_per_example)
+            avgpr_w, avgpr_m, pr_auc_valid_knn = calculate_PRCurve(labels_valid, anomaly_score_per_example)
+            #print("Dim:",dimension,"Thrs:", curr_threshold,"| roc-auc:",roc_auc_attri_dims_count_w,"| avgpr:",avgpr_w,"| pr_auc:",pr_auc_valid_knn)
+            if highest_roc_auc_attri_dims_count_w < roc_auc_attri_dims_count_w:
+                highest_roc_auc_attri_dims_count_w = roc_auc_attri_dims_count_w
+                highest_dict["dim"] = dimension
+                highest_dict["threshold"] = curr_threshold
+                anomaly_score_per_example_w_highest_roc_auc = anomaly_score_per_example
+    print("Highest ROC AUC: ", highest_roc_auc_attri_dims_count_w, "at dim:",highest_dict["dim"],"with threshold:",highest_dict["threshold"] )
+
+    # anomaly_score_per_example_w_highest_roc_auc contains anomaly scores (i.e. s(t), thus the number of elements
+    # from the residual matrix that are higher than a threshold θ) based on the highest roc_auc (i.e. best decicable between normal and abnormal)
+    # Aim:  τ = β · max {s(t)valid} with β ∈ [1, 2] is set to maximize the F1 Score over the validation period. (p. 1414)
+    beta = 0
+    tau = 0
+
+    # Get s(t)_valid max on (failure free?) valid  data (p. 1414)
+    '''
+    example_idx_of_curr_label = np.where(labels_valid == "no_failure")
+    as_no_failure = anomaly_score_per_example_w_highest_roc_auc[example_idx_of_curr_label]
+    st_valid_max = np.max(as_no_failure)
+    print("max(s(t)_valid)", st_valid_max)
+    
+    
+    for curr_beta in arange(1,2,0.01):
+        curr_threshold = st_valid_max*curr_beta
+        y_pred = np.where(anomaly_score_per_example_w_highest_roc_auc >= curr_threshold, 1, 0)
+        roc_auc_attri_dims_count_w, roc_auc_attri_dims_count_m = calculate_RocAuc(labels_valid,  y_pred)
+        prec_rec_fscore_support = precision_recall_fscore_support(labels_valid, y_pred, average=average)
+
+        print("Thrs:", curr_threshold, "| roc-auc:", roc_auc_attri_dims_count_w, "| f1:", prec_rec_fscore_support[2])
+    '''
+
+    best_threshold_tau = 0
+    highest_f1_score = 0
+    # Iterate over the number of elements of the residual matrix and look which value maximize the f1-score:
+    for curr_threshold in range(num_data_streams * num_data_streams): #np.sort(anomaly_score_per_example_w_highest_roc_auc):
+        y_pred = np.where(anomaly_score_per_example_w_highest_roc_auc >= curr_threshold, 1, 0)
+        #roc_auc_attri_dims_count_w, roc_auc_attri_dims_count_m = calculate_RocAuc(labels_valid,  y_pred)
+        prec_rec_fscore_support = precision_recall_fscore_support(y_true, y_pred, average='weighted')
+        curr_weighted_f1 = prec_rec_fscore_support[2]
+        #print("Thrs:", curr_threshold, "| roc-auc:", 0, "| f1:", curr_weighted_f1)
+
+        # Store highest f1 score and the threshold tau
+        if highest_f1_score < curr_weighted_f1:
+            best_threshold_tau = curr_threshold
+            highest_f1_score = curr_weighted_f1
+
+    print("Best f1-score on valid data set: ", highest_f1_score,"with threshold tau=",best_threshold_tau)
+    y_pred = np.where(anomaly_score_per_example_w_highest_roc_auc >= best_threshold_tau, 1, 0)
+    plotHistogram(anomaly_score_per_example_w_highest_roc_auc, labels_valid, filename="Plot_MSCRED_AnoScore_per_Example_Valid.png", min=np.min(anomaly_score_per_example_w_highest_roc_auc),
+                  max=np.max(anomaly_score_per_example_w_highest_roc_auc), num_of_bins=20)
+    print(classification_report(y_true, y_pred, target_names=['normal', 'anomaly'], digits=4))
+
+    ### UnSupervised
+    # Using the max value and 99th percentil value from failure-free data ...
+    threshold_unsupervised_max = {}
+    threshold_unsupervised_percentil = {}
+    if not residual_matrix_wo_FaF is None:
+        for dimension in range(residual_matrix.shape[3]):
+            data_curr_dim = residual_matrix_wo_FaF[:, :, :, dimension]
+            # Max value (i.e. distance) from all residual matrices
+            threshold_unsupervised_max[dimension] = np.max(data_curr_dim.flatten())
+            # 99 percentil value over all residual matrices
+            percentil = 99
+            threshold_unsupervised_percentil[dimension] = np.percentile(data_curr_dim.flatten(), percentil)
+
+            print("Unsupvervised max thrs:",threshold_unsupervised_max[dimension],"| 99th percentil:", threshold_unsupervised_percentil[dimension])
+
+    # Classify test data
+    #if not residual_matrix_test is None:
+    # 1. Calculate anomaly scores on test data (.i.e sum of elements over a threshold in the residual matrix)
+    residual_matrix_best_dim = residual_matrix_test[:,:,:,highest_dict["dim"]]
+    residual_matrix_best_dim_flat = np.reshape(residual_matrix_best_dim, (residual_matrix_best_dim.shape[0], num_data_streams * num_data_streams))
+    anomaly_score_per_example_test = np.zeros((residual_matrix_best_dim_flat.shape[0]))
+    for example_idx in range(residual_matrix_best_dim_flat.shape[0]):
+        res_mat_example = residual_matrix_best_dim_flat[example_idx, :]
+        num_over_thrshld = len(res_mat_example[res_mat_example > highest_dict["threshold"]])
+        anomaly_score_per_example_test[example_idx] = num_over_thrshld
+
+    # 2. Classify scores as abnormal (i.e. anomaly) or normal (i.e. no anomaly)
+    y_pred = np.where(anomaly_score_per_example_test >= best_threshold_tau, 1, 0)
+
+    # 3. Get residuals per data stream
+    residual_matrix_best_dim_marked = np.where(residual_matrix_best_dim > highest_dict["threshold"], 1, 0)
+    #residual_matrix_best_dim_marked_axis1 = np.sum(residual_matrix_best_dim_marked, axis=1)
+    #residual_matrix_best_dim_marked_axis2 = np.sum(residual_matrix_best_dim_marked, axis=2)
+    residual_matrix_best_dim_marked_axis1 = np.sum(residual_matrix_best_dim, axis=1)
+    residual_matrix_best_dim_marked_axis2 = np.sum(residual_matrix_best_dim, axis=2)
+    print("residual_matrix_best_dim_marked_axis1 shape:", residual_matrix_best_dim_marked_axis1.shape, "residual_matrix_best_dim_marked_axis2 shape:", residual_matrix_best_dim_marked_axis2.shape)
+    residuals_per_data_stream = residual_matrix_best_dim_marked_axis1 + residual_matrix_best_dim_marked_axis2
+    print("residuals_per_data_stream shape", residuals_per_data_stream.shape)
+
+    # Get ordered and combined dictonary of anomalous data streams
+    residuals_per_data_stream_idx = np.argsort(-residuals_per_data_stream)
+
+    # store information as dictonary
+    store_relevant_attribut_idx = {}
+    store_relevant_attribut_dis = {}
+    store_relevant_attribut_name = {}
+    for i in range(residuals_per_data_stream_idx.shape[0]):
+        store_relevant_attribut_idx[i] = residuals_per_data_stream_idx[i,:]
+        store_relevant_attribut_dis[i] = residuals_per_data_stream[i, :]
+        store_relevant_attribut_name[i] = attr_names[residuals_per_data_stream_idx[i, :]]
+        print("residuals_per_data_stream["+str(i)+",:]", residuals_per_data_stream[i, :])
+        print("residuals_per_data_stream_idx["+str(i)+",:]", residuals_per_data_stream_idx[i, :])
+        print("attr_names[residuals_per_data_stream_idx["+str(i)+", :]]", attr_names[residuals_per_data_stream_idx[i, :]])
+
+    #store_relevant_attribut_idx = residuals_per_data_stream_idx
+    #store_relevant_attribut_dis = residuals_per_data_stream
+    #store_relevant_attribut_name = attr_names[residuals_per_data_stream_idx]
+
+
+    import pickle
+    a_file = open('store_relevant_attribut_idx_' + config.curr_run_identifier + '.pkl', "wb")
+    pickle.dump(store_relevant_attribut_idx, a_file)
+    a_file.close()
+    a_file = open('store_relevant_attribut_dis_' + config.curr_run_identifier + '.pkl', "wb")
+    pickle.dump(store_relevant_attribut_dis, a_file)
+    a_file.close()
+    a_file = open('store_relevant_attribut_name_' + config.curr_run_identifier + '.pkl', "wb")
+    pickle.dump(store_relevant_attribut_name, a_file)
+    a_file.close()
+    np.save('predicted_anomalies' + config.curr_run_identifier + '.npy', y_pred)
+
+
+    return anomaly_score_per_example_test, best_threshold_tau #, y_pred
+
+
+def calculateThresholdWithLabelsAsMSCRED_Scaled(residual_matrix_scaled, residual_matrix_scaled_axis1,residual_matrix_scaled_axis2, labels_valid, residual_matrix_test,residual_matrix_test_axis1,residual_matrix_test_axis2,
+                                         residual_matrix_wo_FaF=None, attr_names=None):
+    # Treshold calculation
+
+    # Determine threshold θ empirically  Paper only states the following: (" ... the number of elements whose value is
+    # larger than a given threshold θ in the residual signature matrices and θ is detemined empirically over different
+    # datasets." (p. 1413)
+    # Idea: iterate over all residual values of the validation set and then use the threshold with the highest ROC-AUC
+    # since to optimize the anomaly score s(t) w.r.t. to an f1-score (p. 1414) labeled data is needed anyway
+
+    ### Supervised
+    # 381/61/61/
+    highest_roc_auc_attri_dims_count_w = 0
+    highest_dict = {}
+    num_examples = residual_matrix_scaled.shape[0]
+    num_data_streams = residual_matrix_scaled.shape[1]
+    anomaly_score_per_example_w_highest_roc_auc = np.zeros((num_examples))
+    y_true = np.where(labels_valid == 'no_failure', 0, 1)
+    for dimension in range(residual_matrix_scaled.shape[3]):
+        data_curr_dim = residual_matrix_scaled[:, :, :, dimension]
+        # Reshape to (examples, residual elements) --> (381,61*61)
+        data_curr_dim = np.reshape(data_curr_dim, (num_examples, num_data_streams * num_data_streams))
+        # Normalize the data
+        # scaler = scaler_dict[dimension]
+        # data_curr_dim = scaler.transform(data_curr_dim)
+        # Iterate over all occured residual values, using every 1000th entry
+        for curr_threshold in np.sort(data_curr_dim.flatten()[0::1000]):
+            # Define broken elements for every example:
+            anomaly_score_per_example = np.zeros((num_examples))
+            for example_idx in range(num_examples):
+                res_mat_example = data_curr_dim[example_idx, :]
+                num_over_thrshld = len(res_mat_example[res_mat_example > curr_threshold])
+                anomaly_score_per_example[example_idx] = num_over_thrshld
+            # All data collected for current threshold ... do some evaluation with roc auc
+            roc_auc_attri_dims_count_w, roc_auc_attri_dims_count_m = calculate_RocAuc(labels_valid,
+                                                                                      anomaly_score_per_example)
+            avgpr_w, avgpr_m, pr_auc_valid_knn = calculate_PRCurve(labels_valid, anomaly_score_per_example)
+            # print("Dim:",dimension,"Thrs:", curr_threshold,"| roc-auc:",roc_auc_attri_dims_count_w,"| avgpr:",avgpr_w,"| pr_auc:",pr_auc_valid_knn)
+            if highest_roc_auc_attri_dims_count_w < roc_auc_attri_dims_count_w:
+                highest_roc_auc_attri_dims_count_w = roc_auc_attri_dims_count_w
+                highest_dict["dim"] = dimension
+                highest_dict["threshold"] = curr_threshold
+                anomaly_score_per_example_w_highest_roc_auc = anomaly_score_per_example
+    print("Highest ROC AUC: ", highest_roc_auc_attri_dims_count_w, "at dim:", highest_dict["dim"], "with threshold:",
+          highest_dict["threshold"])
+
+    # anomaly_score_per_example_w_highest_roc_auc contains anomaly scores (i.e. s(t), thus the number of elements
+    # from the residual matrix that are higher than a threshold θ) based on the highest roc_auc (i.e. best decicable between normal and abnormal)
+    # Aim:  τ = β · max {s(t)valid} with β ∈ [1, 2] is set to maximize the F1 Score over the validation period. (p. 1414)
+    beta = 0
+    tau = 0
+
+    # Get s(t)_valid max on (failure free?) valid  data (p. 1414)
+    '''
+    example_idx_of_curr_label = np.where(labels_valid == "no_failure")
+    as_no_failure = anomaly_score_per_example_w_highest_roc_auc[example_idx_of_curr_label]
+    st_valid_max = np.max(as_no_failure)
+    print("max(s(t)_valid)", st_valid_max)
+
+
+    for curr_beta in arange(1,2,0.01):
+        curr_threshold = st_valid_max*curr_beta
+        y_pred = np.where(anomaly_score_per_example_w_highest_roc_auc >= curr_threshold, 1, 0)
+        roc_auc_attri_dims_count_w, roc_auc_attri_dims_count_m = calculate_RocAuc(labels_valid,  y_pred)
+        prec_rec_fscore_support = precision_recall_fscore_support(labels_valid, y_pred, average=average)
+
+        print("Thrs:", curr_threshold, "| roc-auc:", roc_auc_attri_dims_count_w, "| f1:", prec_rec_fscore_support[2])
+    '''
+
+    best_threshold_tau = 0
+    highest_f1_score = 0
+    # Iterate over the number of elements of the residual matrix and look which value maximize the f1-score:
+    for curr_threshold in range(
+            num_data_streams * num_data_streams):  # np.sort(anomaly_score_per_example_w_highest_roc_auc):
+        y_pred = np.where(anomaly_score_per_example_w_highest_roc_auc >= curr_threshold, 1, 0)
+        # roc_auc_attri_dims_count_w, roc_auc_attri_dims_count_m = calculate_RocAuc(labels_valid,  y_pred)
+        prec_rec_fscore_support = precision_recall_fscore_support(y_true, y_pred, average='weighted')
+        curr_weighted_f1 = prec_rec_fscore_support[2]
+        # print("Thrs:", curr_threshold, "| roc-auc:", 0, "| f1:", curr_weighted_f1)
+
+        # Store highest f1 score and the threshold tau
+        if highest_f1_score < curr_weighted_f1:
+            best_threshold_tau = curr_threshold
+            highest_f1_score = curr_weighted_f1
+
+    print("Best f1-score on valid data set: ", highest_f1_score, "with threshold tau=", best_threshold_tau)
+    y_pred = np.where(anomaly_score_per_example_w_highest_roc_auc >= best_threshold_tau, 1, 0)
+    plotHistogram(anomaly_score_per_example_w_highest_roc_auc, labels_valid,
+                  filename="Plot_MSCRED_AnoScore_per_Example_Valid.png",
+                  min=np.min(anomaly_score_per_example_w_highest_roc_auc),
+                  max=np.max(anomaly_score_per_example_w_highest_roc_auc), num_of_bins=20)
+    print(classification_report(y_true, y_pred, target_names=['normal', 'anomaly'], digits=4))
+
+    ### UnSupervised
+    # Using the max value and 99th percentil value from failure-free data ...
+    threshold_unsupervised_max = {}
+    threshold_unsupervised_percentil = {}
+    if not residual_matrix_wo_FaF is None:
+        for dimension in range(residual_matrix_scaled.shape[3]):
+            data_curr_dim = residual_matrix_wo_FaF[:, :, :, dimension]
+            # Max value (i.e. distance) from all residual matrices
+            threshold_unsupervised_max[dimension] = np.max(data_curr_dim.flatten())
+            # 99 percentil value over all residual matrices
+            percentil = 99
+            threshold_unsupervised_percentil[dimension] = np.percentile(data_curr_dim.flatten(), percentil)
+
+            print("Unsupvervised max thrs:", threshold_unsupervised_max[dimension], "| 99th percentil:",
+                  threshold_unsupervised_percentil[dimension])
+
+    # Classify test data
+    # if not residual_matrix_test is None:
+    # 1. Calculate anomaly scores on test data (.i.e sum of elements over a threshold in the residual matrix)
+    residual_matrix_best_dim = residual_matrix_test[:, :, :, highest_dict["dim"]]
+    residual_matrix_best_dim_flat = np.reshape(residual_matrix_best_dim,
+                                               (residual_matrix_best_dim.shape[0], num_data_streams * num_data_streams))
+    anomaly_score_per_example_test = np.zeros((residual_matrix_best_dim_flat.shape[0]))
+    for example_idx in range(residual_matrix_best_dim_flat.shape[0]):
+        res_mat_example = residual_matrix_best_dim_flat[example_idx, :]
+        num_over_thrshld = len(res_mat_example[res_mat_example > highest_dict["threshold"]])
+        anomaly_score_per_example_test[example_idx] = num_over_thrshld
+
+    # 2. Classify scores as abnormal (i.e. anomaly) or normal (i.e. no anomaly)
+    y_pred = np.where(anomaly_score_per_example_test >= best_threshold_tau, 1, 0)
+
+    # 3. Get residuals per data stream
+    # residual_matrix_best_dim_marked = np.where(residual_matrix_best_dim > highest_dict["threshold"], 1, 0)
+    # residual_matrix_best_dim_marked_axis1 = np.sum(residual_matrix_best_dim_marked, axis=1)
+    # residual_matrix_best_dim_marked_axis2 = np.sum(residual_matrix_best_dim_marked, axis=2)
+    residual_matrix_best_dim_scaled_axis1 = residual_matrix_test_axis1[:, :, :, highest_dict["dim"]]
+    residual_matrix_best_dim_scaled_axis2 = residual_matrix_test_axis2[:, :, :, highest_dict["dim"]]
+    residual_matrix_best_dim_marked_axis1 = np.sum(residual_matrix_best_dim_scaled_axis1, axis=1)
+    residual_matrix_best_dim_marked_axis2 = np.sum(residual_matrix_best_dim_scaled_axis2, axis=2)
+    print("residual_matrix_best_dim_marked_axis1 shape:", residual_matrix_best_dim_marked_axis1.shape,
+          "residual_matrix_best_dim_marked_axis2 shape:", residual_matrix_best_dim_marked_axis2.shape)
+    residuals_per_data_stream = residual_matrix_best_dim_marked_axis1 + residual_matrix_best_dim_marked_axis2
+    print("residuals_per_data_stream shape", residuals_per_data_stream.shape)
+
+    # Get ordered and combined dictonary of anomalous data streams
+    residuals_per_data_stream_idx = np.argsort(-residuals_per_data_stream)
+
+    # Store information as dictonary
+    store_relevant_attribut_idx = {}
+    store_relevant_attribut_dis = {}
+    store_relevant_attribut_name = {}
+    for i in range(residuals_per_data_stream_idx.shape[0]):
+        store_relevant_attribut_idx[i] = residuals_per_data_stream_idx[i, :]
+        store_relevant_attribut_dis[i] = residuals_per_data_stream[i, :]
+        store_relevant_attribut_name[i] = attr_names[residuals_per_data_stream_idx[i, :]]
+        print("residuals_per_data_stream[" + str(i) + ",:]", residuals_per_data_stream[i, :])
+        print("residuals_per_data_stream_idx[" + str(i) + ",:]", residuals_per_data_stream_idx[i, :])
+        print("attr_names[residuals_per_data_stream_idx[" + str(i) + ", :]]",
+              attr_names[residuals_per_data_stream_idx[i, :]])
+
+    # store_relevant_attribut_idx = residuals_per_data_stream_idx
+    # store_relevant_attribut_dis = residuals_per_data_stream
+    # store_relevant_attribut_name = attr_names[residuals_per_data_stream_idx]
+
+    import pickle
+    a_file = open('store_relevant_attribut_idx_' + config.curr_run_identifier + '.pkl', "wb")
+    pickle.dump(store_relevant_attribut_idx, a_file)
+    a_file.close()
+    a_file = open('store_relevant_attribut_dis_' + config.curr_run_identifier + '.pkl', "wb")
+    pickle.dump(store_relevant_attribut_dis, a_file)
+    a_file.close()
+    a_file = open('store_relevant_attribut_name_' + config.curr_run_identifier + '.pkl', "wb")
+    pickle.dump(store_relevant_attribut_name, a_file)
+    a_file.close()
+    np.save('predicted_anomalies' + config.curr_run_identifier + '.npy', y_pred)
+
+    return anomaly_score_per_example_test, best_threshold_tau  # , y_pred
+
+def calculateThresholdWithLabels(reconstructed_input, recon_err_perAttrib_valid, labels_valid, mse_per_example=None, print_pandas_statistics_for_validation=False, feature_names=None,  mse_per_example_per_dims_wf=None, scaler_dict=None):
+    # We have four possibilities to find a threshold with reasonable effort.
+    # i) calculating the threshold as MSE over all dimension
+    # ii) calculating the threshold as MSE for each dimension
+    # iii) calculating on threshold and calculating the number of attribute violations
+    # iv) similar to three, but for each dimension
+    y_true = np.where(labels_valid == 'no_failure', 0, 1)
+    #print("___y_true: ",y_true)
+    #y_true = np.reshape(y_true, y_true.shape[0])
+    roc_auc_mse_w, roc_auc_mse_m = calculate_RocAuc(y_true, mse_per_example)
+    avgpr_w, avgpr_m, pr_auc = calculate_PRCurve(y_true, mse_per_example)
+
+    plotHistogram(mse_per_example, labels_valid, filename="Plot_MSE_per_Example_Valid.png", min=np.min(mse_per_example), max=np.max(mse_per_example),num_of_bins=10)
+
+    #sort all anomaly scores and iterate over them for finding the highest score
+    f1_weighted_max_threshold   = 0
+    f1_weighted_max_value       = 0
+    f1_macro_max_threshold      = 0
+    f1_macro_max_value          = 0
+    f1_weighted_max_threshold_per_dim   = 0
+    f1_weighted_max_value_per_dim       = 0
+    f1_macro_max_threshold_per_dim      = 0
+    f1_macro_max_value_per_dim          = 0
+    best_dim = 0
+    f1_weighted_max_threshold_per_dim_attr   = 0
+    f1_weighted_max_value_per_dim_attr       = 0
+    f1_macro_max_threshold_per_dim_attr      = 0
+    f1_macro_max_value_per_dim_attr          = 0
+    best_dim_attr = 0
+    f1_weighted_max_threshold_per_dim_attr_percentil   = 0
+    f1_weighted_max_value_per_dim_attr_percentil       = 0
+    f1_macro_max_threshold_per_dim_attr_percentil      = 0
+    f1_macro_max_value_per_dim_attr_percentil          = 0
+    best_dim_attr_percentil = 0
+
+    # i) mse over all different correlation length dimensions
+    for curr_threshold in np.sort(mse_per_example):
+        y_pred = np.where(mse_per_example >= curr_threshold, 1, 0)
+        #print("y_pred shape:", y_pred.shape)
+        #print("y_true shape:", y_true.shape)
+        # print(" ---- ")
+        # print("Threshold: ", curr_threshold)
+        # print(classification_report(y_true, y_pred, target_names=['normal', 'anomaly']))
+        TN, FP, FN, TP = confusion_matrix(y_true, y_pred).ravel()
+        p_r_f_s_weighted = precision_recall_fscore_support(y_true, y_pred, average='weighted')
+        p_r_f_s_macro = precision_recall_fscore_support(y_true, y_pred, average='weighted')
+        # Sensitivity, hit rate, recall, or true positive rate
+        TPR = TP / (TP + FN)
+        # Specificity or true negative rate
+        TNR = TN / (TN + FP)
+        # Precision or positive predictive value
+        PPV = TP / (TP + FP)
+        # Negative predictive value
+        NPV = TN / (TN + FN)
+        # Fall out or false positive rate
+        FPR = FP / (FP + TN)
+        # False negative rate
+        FNR = FN / (TP + FN)
+        # False discovery rate
+        FDR = FP / (TP + FP)
+
+        # Overall accuracy
+        ACC = (TP + TN) / (TP + FP + FN + TN)
+        # print("precision_recall_fscore_support: ", precision_recall_fscore_support(y_true, y_pred, average='weighted'))
+        # print(" ---- ")
+        if f1_weighted_max_value < p_r_f_s_weighted[2]:
+            f1_weighted_max_value = p_r_f_s_weighted[2]
+            f1_weighted_max_threshold = curr_threshold
+        if f1_macro_max_value < p_r_f_s_weighted[2]:
+            f1_macro_max_value = p_r_f_s_macro[2]
+            f1_macro_max_threshold = curr_threshold
+    # ii) mse over all different correlation length dimensions
+    for dimension in range(mse_per_example_per_dims_wf.shape[1]):
+        for curr_threshold in np.sort(mse_per_example_per_dims_wf[:,dimension]):
+            y_pred = np.where(mse_per_example_per_dims_wf[:,dimension] >= curr_threshold, 1, 0)
+            #print("y_pred shape:", y_pred.shape)
+            #print("y_true shape:", y_true.shape)
+            # print(" ---- ")
+            # print("Threshold: ", curr_threshold)
+            # print(classification_report(y_true, y_pred, target_names=['normal', 'anomaly']))
+            TN, FP, FN, TP = confusion_matrix(y_true, y_pred).ravel()
+            p_r_f_s_weighted = precision_recall_fscore_support(y_true, y_pred, average='weighted')
+            p_r_f_s_macro = precision_recall_fscore_support(y_true, y_pred, average='weighted')
+            # Sensitivity, hit rate, recall, or true positive rate
+            TPR = TP / (TP + FN)
+            # Specificity or true negative rate
+            TNR = TN / (TN + FP)
+            # Precision or positive predictive value
+            PPV = TP / (TP + FP)
+            # Negative predictive value
+            NPV = TN / (TN + FN)
+            # Fall out or false positive rate
+            FPR = FP / (FP + TN)
+            # False negative rate
+            FNR = FN / (TP + FN)
+            # False discovery rate
+            FDR = FP / (TP + FP)
+
+            # Overall accuracy
+            ACC = (TP + TN) / (TP + FP + FN + TN)
+            # print("precision_recall_fscore_support: ", precision_recall_fscore_support(y_true, y_pred, average='weighted'))
+            # print(" ---- ")
+            if f1_weighted_max_value_per_dim < p_r_f_s_weighted[2]:
+                f1_weighted_max_value_per_dim = p_r_f_s_weighted[2]
+                f1_weighted_max_threshold_per_dim = curr_threshold
+                best_dim = dimension
+                #print("Dimension: ", dimension,"f1_weighted_max_value_per_dim: ", f1_weighted_max_value_per_dim)
+            if f1_macro_max_value_per_dim < p_r_f_s_weighted[2]:
+                f1_macro_max_value_per_dim = p_r_f_s_macro[2]
+                f1_macro_max_threshold_per_dim = curr_threshold
+                best_dim = dimension
+    # iii) attribute over threshold with same threshold (single one) for every attribute
+    for dimension in range(recon_err_perAttrib_valid.shape[2]):
+        data_curr_dim = recon_err_perAttrib_valid[:, :, dimension]
+        # TODO: Normalisierung testen
+        #Normalize the data
+        #scaler = scaler_dict[dimension]
+        #data_curr_dim = scaler.transform(data_curr_dim)
+        for curr_threshold in np.sort(data_curr_dim.flatten()[0::25]):
+            #print("curr_threshold: ", curr_threshold)
+            anomalous_attributes_found = np.where(data_curr_dim >= curr_threshold, 1, 0)
+            #print("anomalous_attributes_found.shape:",anomalous_attributes_found.shape)
+            per_axis = np.sum(anomalous_attributes_found, axis=1)
+            #print("per_axis.shape:", per_axis.shape)
+            y_pred = np.where(per_axis >= 1, 1, 0)
+            #print("y_pred.shape:", y_pred.shape)
+            TN, FP, FN, TP = confusion_matrix(y_true, y_pred).ravel()
+            p_r_f_s_weighted = precision_recall_fscore_support(y_true, y_pred, average='weighted')
+            p_r_f_s_macro = precision_recall_fscore_support(y_true, y_pred, average='weighted')
+            # Sensitivity, hit rate, recall, or true positive rate
+            TPR = TP / (TP + FN)
+            # Specificity or true negative rate
+            TNR = TN / (TN + FP)
+            # Precision or positive predictive value
+            PPV = TP / (TP + FP)
+            # Negative predictive value
+            NPV = TN / (TN + FN)
+            # Fall out or false positive rate
+            FPR = FP / (FP + TN)
+            # False negative rate
+            FNR = FN / (TP + FN)
+            # False discovery rate
+            FDR = FP / (TP + FP)
+
+            # Overall accuracy
+            ACC = (TP + TN) / (TP + FP + FN + TN)
+            '''
+            print("NAN found y_pred: ", np.where(np.isnan(y_pred)))
+            y_pred = np.nan_to_num(y_pred)
+            y_pred[y_pred > 1e308] = 0
+            y_pred[y_pred < -1e308] = 0
+            y_pred.astype('float64')
+            print("y_test_pred_df: ", y_pred.shape)
+            #print("precision_recall_fscore_support: ", precision_recall_fscore_support(y_true, y_pred, average='weighted'))
+            # print(" ---- ")
+            roc_auc_iii_w, roc_auc_iii_m = calculate_RocAuc(y_true, y_pred)
+            print("roc_auc_iii_w: ", roc_auc_iii_w)
+            avgpr_w_iii, avgpr_m_iii, pr_auc = calculate_PRCurve(y_true, mse_per_example)
+            '''
+            if f1_weighted_max_value_per_dim_attr < p_r_f_s_weighted[2]:
+                f1_weighted_max_value_per_dim_attr = p_r_f_s_weighted[2]
+                f1_weighted_max_threshold_per_dim_attr = curr_threshold
+                best_dim_attr= dimension
+                # print("Dimension: ", dimension,"f1_weighted_max_value_per_dim: ", f1_weighted_max_value_per_dim)
+            if f1_macro_max_value_per_dim_attr < p_r_f_s_weighted[2]:
+                f1_macro_max_value_per_dim_attr = p_r_f_s_macro[2]
+                f1_macro_max_threshold_per_dim_attr = curr_threshold
+    # iv) attribute over threshold for with different thresholds based on the best percentile over all attributes
+    thresholds = np.zeros((recon_err_perAttrib_valid.shape[2], recon_err_perAttrib_valid.shape[1]))
+    for i_dim in range(reconstructed_input.shape[3]):
+        data_curr_dim = recon_err_perAttrib_valid[:, :, i_dim]
+        # TODO: Normalisierung testen
+        # Normalize the data
+        #scaler = scaler_dict[i_dim]
+        #data_curr_dim = scaler.transform(data_curr_dim)
+        # print("data_curr_dim shape: ", data_curr_dim.shape)
+        data_curr_dim = np.squeeze(data_curr_dim)
+        # print("data_curr_dim shape: ", data_curr_dim.shape)
+        df_curr_dim = pd.DataFrame(data_curr_dim)
+        # print(df_curr_dim.head())
+        for percentil in [.25, .55, .75, 0.85, 0.92, 0.95, 0.97, 0.99]:
+            df_curr_dim_described= df_curr_dim.describe(percentiles=[percentil])
+            #print("df_curr_dim_described", df_curr_dim_described.tail())
+            # required since different from given percentil values as used in pandas data framse
+            key = (str(percentil)+"%").replace("0.","")
+            if len(key) >3:
+                key = key[:2] + '.' + key[2:]
+                #print("key: ", key)
+            #print("df_curr_dim_described.loc[key, :].values: ", df_curr_dim_described.loc[key, :].values)
+            thresholds[i_dim, :] = df_curr_dim_described.loc[key, :].values
+            #print(df_curr_dim_described.loc['mean', :].values)
+            #print(df_curr_dim_described.loc['std', :].values)
+            #print("curr_threshold shape: ", curr_threshold.shape)
+            #print("data_curr_dim shape: ", data_curr_dim.shape)
+            anomalous_attributes_found = np.where(data_curr_dim >= thresholds[i_dim, :], 1, 0)
+            #print("anomalous_attributes_found.shape:",anomalous_attributes_found.shape)
+            per_axis = np.sum(anomalous_attributes_found, axis=1)
+            #print("per_axis.shape:", per_axis.shape)
+            y_pred = np.where(per_axis >= 1, 1, 0)
+            #print("y_pred.shape:", y_pred.shape)
+            TN, FP, FN, TP = confusion_matrix(y_true, y_pred).ravel()
+            p_r_f_s_weighted = precision_recall_fscore_support(y_true, y_pred, average='weighted')
+            p_r_f_s_macro = precision_recall_fscore_support(y_true, y_pred, average='weighted')
+
+            #print("precision_recall_fscore_support: ", precision_recall_fscore_support(y_true, y_pred, average='weighted'))
+            # print(" ---- ")
+            if f1_weighted_max_value_per_dim_attr_percentil < p_r_f_s_weighted[2]:
+                f1_weighted_max_value_per_dim_attr_percentil = p_r_f_s_weighted[2]
+                f1_weighted_max_threshold_per_dim_attr_percentil = percentil
+                best_dim_attr_percentil = dimension
+                # print("Dimension: ", dimension,"f1_weighted_max_value_per_dim: ", f1_weighted_max_value_per_dim)
+            if f1_macro_max_value_per_dim_attr_percentil < p_r_f_s_weighted[2]:
+                f1_macro_max_value_per_dim_attr_percentil = p_r_f_s_macro[2]
+                f1_macro_max_threshold_per_dim_attr_percentil = percentil
+                best_dim_attr_percentil = dimension
+
+    print(" ++++ VALID DATA with MSE per example ++++ ")
+    print("ROCAUC:\t", roc_auc_mse_w)
+    print("AvgPR:\t", avgpr_w)
+    print("PRAUC:\t", pr_auc)
+    print(" ++++ ")
+    print(" Best Threshold on Validation Split Found for dimension:")
+    print(" F1 Score weighted:\t", f1_weighted_max_value, "\t\t Threshold: ", f1_weighted_max_threshold)
+    print(" F1 Score macro:\t", f1_macro_max_value, "\t\t Threshold: ", f1_macro_max_threshold)
+    print(" F1 Score weighted:\t", f1_weighted_max_value_per_dim, "\t\t Threshold: ", f1_weighted_max_threshold_per_dim,"for dimension:",best_dim)
+    print(" F1 Score macro:\t", f1_macro_max_value_per_dim, "\t\t Threshold: ", f1_macro_max_threshold_per_dim,"for dimension:",best_dim)
+    print(" F1 Score weighted:\t", f1_weighted_max_value_per_dim_attr, "\t\t Threshold: ", f1_weighted_max_threshold_per_dim_attr,"for dimension:",best_dim_attr)
+    print(" F1 Score macro:\t", f1_macro_max_value_per_dim_attr, "\t\t Threshold: ", f1_macro_max_threshold_per_dim_attr,"for dimension:",best_dim_attr)
+    print(" F1 Score weighted:\t", f1_weighted_max_value_per_dim_attr_percentil, "\t\t Threshold: ", f1_weighted_max_threshold_per_dim_attr_percentil,"for dimension:",best_dim_attr_percentil)
+    print(" F1 Score macro:\t", f1_macro_max_value_per_dim_attr_percentil, "\t\t Threshold: ", f1_macro_max_threshold_per_dim_attr_percentil,"for dimension:",best_dim_attr_percentil)
+    print(" ++++ ")
+
+    return f1_weighted_max_threshold, [f1_weighted_max_threshold_per_dim, best_dim], [f1_weighted_max_threshold_per_dim_attr, best_dim_attr], thresholds
+
+def evaluate(anomaly_score, labels_test, anomaly_threshold, average='weighted'):
+        # prepare the labels according sklearn
+        y_true = np.where(labels_test == 'no_failure', 0, 1)
+        #np.reshape(y_true, y_true.shape[0])
+        plotHistogram(anomaly_score, labels_test, filename="Plot_MSE_per_Example_Test.png",
+                      min=np.min(anomaly_score), max=np.max(anomaly_score), num_of_bins=50)
+        if config.use_memory_restriction:
+            #remove the last element since problem with batch handling ...
+            y_true = y_true[:-1]
+
+        # apply threshold for anomaly decision
+        y_pred = np.where(anomaly_score >= anomaly_threshold, 1, 0)
+
+        TN, FP, FN, TP = confusion_matrix(y_true, y_pred).ravel()
+        # p_r_f_s_weighted = precision_recall_fscore_support(y_true, y_pred, average='weighted')
+        # p_r_f_s_macro = precision_recall_fscore_support(y_true, y_pred, average='weighted')
+        # Sensitivity, hit rate, recall, or true positive rate
+        TPR = TP / (TP + FN)
+        # Specificity or true negative rate
+        TNR = TN / (TN + FP)
+        # Precision or positive predictive value
+        PPV = TP / (TP + FP)
+        # Negative predictive value
+        NPV = TN / (TN + FN)
+        # Fall out or false positive rate
+        FPR = FP / (FP + TN)
+        # False negative rate
+        FNR = FN / (TP + FN)
+        # False discovery rate
+        FDR = FP / (TP + FP)
+
+        # Overall accuracy
+        ACC = (TP + TN) / (TP + FP + FN + TN)
+        roc_auc_mse_w, roc_auc_mse_m = calculate_RocAuc(y_true, anomaly_score)
+        avgpr_w, avgpr_m, pr_auc = calculate_PRCurve(y_true, anomaly_score)
+        print("")
+        print(" +++ +++ +++ +++ +++ FINAL EVAL TEST +++ +++ +++ +++ +++ +++ +++")
+        print("")
+        print(classification_report(y_true, y_pred, target_names=['normal', 'anomaly'], digits=4))
+        print("")
+        print("FPR:\t", FPR)
+        print("FNR:\t", FNR)
+        print("ROCAUC:\t", roc_auc_mse_w)
+        print("AvgPR:\t", avgpr_w)
+        print("PRAUC:\t", pr_auc)
+        print("")
+        print(" +++ +++ +++ +++ +++ +++ +++ +++ +++ +++ +++ +++ +++ +++ +++ +++")
+        print("")
+        prec_rec_fscore_support = precision_recall_fscore_support(y_true, y_pred, average=average)
+        return prec_rec_fscore_support, y_pred
+
+
+def evaluateAsMSCRED(residual_matrix, labels_test, anomaly_threshold, average='weighted'):
+    # prepare the labels according sklearn
+    y_true = np.where(labels_test == 'no_failure', 0, 1)
+    # np.reshape(y_true, y_true.shape[0])
+    plotHistogram(anomaly_score, labels_test, filename="Plot_MSE_per_Example_Test.png",
+                  min=np.min(anomaly_score), max=np.max(anomaly_score), num_of_bins=50)
+    if config.use_memory_restriction:
+        # remove the last element since problem with batch handling ...
+        y_true = y_true[:-1]
+
+    # apply threshold for anomaly decision
+    y_pred = np.where(anomaly_score >= anomaly_threshold, 1, 0)
+
+    TN, FP, FN, TP = confusion_matrix(y_true, y_pred).ravel()
+    # p_r_f_s_weighted = precision_recall_fscore_support(y_true, y_pred, average='weighted')
+    # p_r_f_s_macro = precision_recall_fscore_support(y_true, y_pred, average='weighted')
+    # Sensitivity, hit rate, recall, or true positive rate
+    TPR = TP / (TP + FN)
+    # Specificity or true negative rate
+    TNR = TN / (TN + FP)
+    # Precision or positive predictive value
+    PPV = TP / (TP + FP)
+    # Negative predictive value
+    NPV = TN / (TN + FN)
+    # Fall out or false positive rate
+    FPR = FP / (FP + TN)
+    # False negative rate
+    FNR = FN / (TP + FN)
+    # False discovery rate
+    FDR = FP / (TP + FP)
+
+    # Overall accuracy
+    ACC = (TP + TN) / (TP + FP + FN + TN)
+    roc_auc_mse_w, roc_auc_mse_m = calculate_RocAuc(y_true, anomaly_score)
+    avgpr_w, avgpr_m, pr_auc = calculate_PRCurve(y_true, anomaly_score)
+    print("")
+    print(" +++ +++ +++ +++ +++ FINAL EVAL TEST +++ +++ +++ +++ +++ +++ +++")
+    print("")
+    print(classification_report(y_true, y_pred, target_names=['normal', 'anomaly'], digits=4))
+    print("")
+    print("FPR:\t", FPR)
+    print("FNR:\t", FNR)
+    print("ROCAUC:\t", roc_auc_mse_w)
+    print("AvgPR:\t", avgpr_w)
+    print("PRAUC:\t", pr_auc)
+    print("")
+    print(" +++ +++ +++ +++ +++ +++ +++ +++ +++ +++ +++ +++ +++ +++ +++ +++")
+    print("")
+    prec_rec_fscore_support = precision_recall_fscore_support(y_true, y_pred, average=average)
+    return prec_rec_fscore_support, y_pred
+
 # This method computes reconstruction errors
-def calculateReconstructionError(real_input, reconstructed_input, plot_heatmaps, use_corr_rel_matrix=False, corr_rel_matrix=None):
+def calculateReconstructionError(real_input, reconstructed_input, plot_heatmaps, use_corr_rel_matrix=False, corr_rel_matrix=None, y_labels=None):
     reconstruction_error_matrixes = np.zeros(
         (reconstructed_input.shape[0], reconstructed_input.shape[1], reconstructed_input.shape[2], reconstructed_input.shape[3]))
     reconstruction_errors_perAttribute = np.zeros(
@@ -78,6 +754,7 @@ def calculateReconstructionError(real_input, reconstructed_input, plot_heatmaps,
     mse_per_example_over_all_dims = np.zeros((reconstructed_input.shape[0]))
     mse_per_example_per_dims = np.zeros((reconstructed_input.shape[0],reconstructed_input.shape[3]))
 
+    print("reconstructed_input.shape[0]: ", reconstructed_input.shape[0])
     for i_example in range(reconstructed_input.shape[0]):  # Iterate over all examples
         for i_dim in range(reconstructed_input.shape[3]):  # Iterate over all "time-dimensions"
             # Get reconstructed and real input data
@@ -99,6 +776,11 @@ def calculateReconstructionError(real_input, reconstructed_input, plot_heatmaps,
             diff_paper_formula = np.square(np.linalg.norm(diff, ord='fro'))
             # diff_paper_formula_axis0 = np.square(np.linalg.norm(diff, ord='fro', axis=0))
             # diff_paper_formula_axis1 = np.square(np.linalg.norm(diff, ord='fro', axis=1))
+
+            # L2 normalization
+            #diff_l2norm_axis0 = tf.math.l2_normalize(diff, axis=0)
+            #diff_l2norm_axis1 = tf.math.l2_normalize(diff, axis=1)
+
             mse_axis0 = np.mean(np.square(diff), axis=0)
             mse_axis1 = np.mean(np.square(diff), axis=1)
             reconstruction_errors_perAttribute[i_example, :reconstructed_input.shape[1], i_dim] = mse_axis0
@@ -110,7 +792,14 @@ def calculateReconstructionError(real_input, reconstructed_input, plot_heatmaps,
             # print("axis0: ", mse_axis0.shape)
             # print("reconstruction_errors_perAttribute:", reconstruction_errors_perAttribute[i_example, :, i_dim])
         if plot_heatmaps:
-            plot_heatmap_of_reconstruction_error2(id=i_example, input=real_input[i_example, :, :, :],
+            if not y_labels is None:
+                if i_example%50 == 0 or not y_labels[i_example] == "no_failure":
+                    plot_heatmap_of_reconstruction_error2(id=i_example, input=real_input[i_example, :, :, :],
+                                                  output=reconstructed_input[i_example, :, :, :],
+                                                  rec_error_matrix=reconstruction_error_matrixes[i_example, :, :, :],y_label=y_labels[i_example])
+            else:
+                if i_example%50 == 0:
+                    plot_heatmap_of_reconstruction_error2(id=i_example, input=real_input[i_example, :, :, :],
                                                   output=reconstructed_input[i_example, :, :, :],
                                                   rec_error_matrix=reconstruction_error_matrixes[i_example, :, :, :])
     # Durch Anzahl an Dimensionen teilen
@@ -164,6 +853,16 @@ def printEvaluation2(reconstructed_input, eval_results_over_all_dimensions, feat
     TP_NF = TN_NF = FP_NF = FN_NF = 0
     TP_F = TN_F = FP_F = FN_F = 0
 
+    # Required to store the information for further processing and evaluation
+    store_relevant_attribut_idx = {}
+    store_relevant_attribut_dis = {}
+    store_relevant_attribut_name = {}
+    y_pred_ano = np.zeros((reconstructed_input.shape[0]))
+
+    # Save number of attribute anomalies to calculate roc-auc values on this
+    anomalous_attributes_per_example = np.zeros((reconstructed_input.shape[0]))
+    anomalous_attributes_dims_per_example = np.zeros((reconstructed_input.shape[0]))
+
     for example_idx in range(reconstructed_input.shape[0]):
         # Adding 1 if the number of reconstruction errors over different dimension is reached, otherwise 0
         idx_with_Anomaly_1 = np.where(np.logical_and(
@@ -177,12 +876,15 @@ def printEvaluation2(reconstructed_input, eval_results_over_all_dimensions, feat
             eval_results_over_all_dimensions[example_idx, reconstructed_input.shape[1]:] > num_of_dim_over_threshold))
         count_dim_anomalies_2 = eval_results_over_all_dimensions[example_idx, reconstructed_input.shape[1]:][idx_with_Anomaly_2]
 
-        if example_idx == reconstructed_input.shape[0]-1:
+        anomalous_attributes_per_example[example_idx] = np.sum(idx_with_Anomaly_1) + np.sum(idx_with_Anomaly_2)
+        anomalous_attributes_dims_per_example[example_idx] = np.sum(count_dim_anomalies_1) + np.sum(count_dim_anomalies_2)
+
+        if example_idx >= reconstructed_input.shape[0]-10:
             print("count_dim_anomalies_1: ", count_dim_anomalies_1)
             print("count_dim_anomalies_2: ", count_dim_anomalies_2)
             print("idx_with_Anomaly_1: ", idx_with_Anomaly_1)
             print("idx_with_Anomaly_2: ", idx_with_Anomaly_2)
-            print("feature_names 1: ",feature_names[idx_with_Anomaly_1])
+            print("feature_names 1: ", feature_names[idx_with_Anomaly_1])
             print("feature_names 2: ", feature_names[idx_with_Anomaly_2])
             print("eval_results_over_all_dimensions 1: ", eval_results_over_all_dimensions[example_idx, :reconstructed_input.shape[1]][23])
             print("eval_results_over_all_dimensions 2: ", eval_results_over_all_dimensions[example_idx, reconstructed_input.shape[1]:][23])
@@ -190,6 +892,13 @@ def printEvaluation2(reconstructed_input, eval_results_over_all_dimensions, feat
         #Get ordered and combined dictonary of anomalous data streams
         anomalies_combined_asc_ordered = order_anomalies(count_dim_anomalies_1, count_dim_anomalies_2,idx_with_Anomaly_1, idx_with_Anomaly_2, feature_names)
         anomaly_detected = False
+
+        # store information
+        #print("anomalies_combined_asc_ordered : ",anomalies_combined_asc_ordered)
+        #print("np.where(np.in1d(anomalies_combined_asc_ordered, feature_names))[0] : ", np.where(np.in1d(anomalies_combined_asc_ordered, feature_names))[0] )
+        store_relevant_attribut_idx[example_idx] = np.where(np.in1d(anomalies_combined_asc_ordered, feature_names))[0]  # np.argsort(-anomalous_attributes_dims_per_example)
+        store_relevant_attribut_dis[example_idx] = anomalous_attributes_dims_per_example[example_idx]
+        store_relevant_attribut_name[example_idx] = anomalies_combined_asc_ordered
 
 
         #Decide which condition / criterium is used for detecting anomalies
@@ -203,6 +912,7 @@ def printEvaluation2(reconstructed_input, eval_results_over_all_dimensions, feat
                 anomaly_detected = True
 
         if anomaly_detected:
+            y_pred_ano[example_idx] = 1
             if labels is not None:
                 if labels[example_idx] == 'no_failure':
                     FN_NF += 1
@@ -212,6 +922,7 @@ def printEvaluation2(reconstructed_input, eval_results_over_all_dimensions, feat
                     TP_F += 1
         else:
             # No Anomaly detected
+            y_pred_ano[example_idx] = 0
             if labels is not None:
                 if labels[example_idx] == 'no_failure':
                     TP_NF += 1
@@ -241,6 +952,7 @@ def printEvaluation2(reconstructed_input, eval_results_over_all_dimensions, feat
                       anomalies_combined_asc_ordered)
 
     if labels is not None:
+        '''
         print("------------------------------------------------------------------------")
         print("\nResults: ")
         print("No_Failure TP: \t\t", TP_NF, "\t\tFailure TP: \t\t", TP_F)
@@ -269,12 +981,170 @@ def printEvaluation2(reconstructed_input, eval_results_over_all_dimensions, feat
         rec_A = TP_A / (TP_A + FN_A+ tf.keras.backend.epsilon())
         acc_A = (TP_A + TN_A) / (TP_A + TN_A + FP_A + FN_A+ tf.keras.backend.epsilon())
         f1_A = 2 * ((prec_A * rec_A) / (prec_A + rec_A+ tf.keras.backend.epsilon()))
+        '''
+        roc_auc_mse_w,roc_auc_mse_m = calculate_RocAuc(labels, mse_values)
+        roc_auc_attri_count_w,roc_auc_attri_count_m = calculate_RocAuc(labels, anomalous_attributes_per_example)
+        roc_auc_attri_dims_count_w, roc_auc_attri_dims_count_m = calculate_RocAuc(labels, anomalous_attributes_dims_per_example)
+        avgpr_w, avgpr_m, pr_auc_valid_knn = calculate_PRCurve(labels,mse_values)
+
+        #mse_values_normalized = (mse_values - np.min(mse_values)) / np.ptp(mse_values)
+        #anomalous_attributes_dims_per_example_normalized = ((anomalous_attributes_dims_per_example + 1) - np.min((anomalous_attributes_dims_per_example))) / np.ptp((anomalous_attributes_dims_per_example + 1))
+        #print("New ROC-AUC: ",calculate_RocAuc(labels, (mse_values_normalized/(anomalous_attributes_dims_per_example_normalized+1))))
         print("------------------------------------------------------------------------")
-        print("OverAll Acc: \t\t %.3f" % acc_A)
-        print("OverAll Precision: \t %.3f" % prec_A)
-        print("OverAll Recall: \t %.3f" %rec_A)
-        print("OverAll F1: \t \t %.3f" % f1_A)
+        #print("OverAll Acc: \t\t %.3f" % acc_A)
+        #print("OverAll Precision: \t %.3f" % prec_A)
+        #print("OverAll Recall: \t %.3f" %rec_A)
+        #print("OverAll F1: \t \t %.3f" % f1_A)
+        print("OverAll RocAuc MSE: \t %.3f" % roc_auc_mse_w,"\t %.3f" % roc_auc_mse_m)
+        print("OverAll RocAuc Att: \t %.3f" % roc_auc_attri_count_w,"\t %.3f" % roc_auc_attri_count_m)
+        print("OverAll RocAuc AttDim: \t %.3f" % roc_auc_attri_dims_count_w,"\t %.3f" % roc_auc_attri_dims_count_m)
         print("------------------------------------------------------------------------")
+        y_pred = np.where(anomalous_attributes_dims_per_example >= 2, 1, 0)
+        y_true = np.where(labels == 'no_failure', 0, 1)
+        roc_auc_wie_eval_w, roc_auc_wie_eval_m = calculate_RocAuc(y_true, y_pred_ano)
+        roc_auc_wie_eval_w_2, roc_auc_wie_eval_m_2 = calculate_RocAuc(y_true, y_pred)
+        print(" +++ +++ +++ +++ +++ FINAL EVAL TEST +++ +++ +++ +++ +++ +++ +++")
+        print("")
+        print(classification_report(y_true, y_pred_ano, target_names=['normal', 'anomaly'], digits=4))
+        print("ROCAUC wie verwendet: ", roc_auc_wie_eval_w)
+        print("ROCAUC wie verwendet: ", roc_auc_wie_eval_w_2)
+
+        #return f1_A, roc_auc_mse_w, roc_auc_attri_count_w, roc_auc_attri_dims_count_w
+        return [store_relevant_attribut_idx, store_relevant_attribut_dis, store_relevant_attribut_name, y_pred]
+
+    def printEvaluation3(reconstructed_input, eval_results_over_all_dimensions, feature_names, labels=None,
+                         num_of_dim_under_threshold=0, num_of_dim_over_threshold=1000, mse_threshold=None,
+                         mse_values=None,
+                         use_attribute_anomaly_as_condition=True, print_all_examples=True, y_pred=None):
+        # Counter variables for no_failure and failure class
+        TP_NF = TN_NF = FP_NF = FN_NF = 0
+        TP_F = TN_F = FP_F = FN_F = 0
+
+        # Required to store the information for further processing and evaluation
+        store_relevant_attribut_idx = {}
+        store_relevant_attribut_dis = {}
+        store_relevant_attribut_name = {}
+        y_pred_ano = np.zeros((reconstructed_input.shape[0]))
+
+        # Save number of attribute anomalies to calculate roc-auc values on this
+        anomalous_attributes_per_example = np.zeros((reconstructed_input.shape[0]))
+        anomalous_attributes_dims_per_example = np.zeros((reconstructed_input.shape[0]))
+
+        for example_idx in range(reconstructed_input.shape[0]):
+            # Adding 1 if the number of reconstruction errors over different dimension is reached, otherwise 0
+            idx_with_Anomaly_1 = np.where(np.logical_and(
+                num_of_dim_under_threshold > eval_results_over_all_dimensions[example_idx,
+                                             :reconstructed_input.shape[1]],
+                eval_results_over_all_dimensions[example_idx,
+                :reconstructed_input.shape[1]] > num_of_dim_over_threshold))
+            count_dim_anomalies_1 = eval_results_over_all_dimensions[example_idx, :reconstructed_input.shape[1]][
+                idx_with_Anomaly_1]
+            # print("eval_results_over_all_dimensions_f: ", eval_results_over_all_dimensions_f[example_idx,:pred.shape[1]])
+            # idx_with_Anomaly_2 = np.where(eval_results_over_all_dimensions_f[example_idx,pred.shape[1]:] > num_of_dim_over_threshold)
+            idx_with_Anomaly_2 = np.where(np.logical_and(
+                num_of_dim_under_threshold > eval_results_over_all_dimensions[example_idx,
+                                             reconstructed_input.shape[1]:],
+                eval_results_over_all_dimensions[example_idx,
+                reconstructed_input.shape[1]:] > num_of_dim_over_threshold))
+            count_dim_anomalies_2 = eval_results_over_all_dimensions[example_idx, reconstructed_input.shape[1]:][
+                idx_with_Anomaly_2]
+
+            anomalous_attributes_per_example[example_idx] = np.sum(idx_with_Anomaly_1) + np.sum(idx_with_Anomaly_2)
+            anomalous_attributes_dims_per_example[example_idx] = np.sum(count_dim_anomalies_1) + np.sum(
+                count_dim_anomalies_2)
+
+            if example_idx >= reconstructed_input.shape[0] - 10:
+                print("count_dim_anomalies_1: ", count_dim_anomalies_1)
+                print("count_dim_anomalies_2: ", count_dim_anomalies_2)
+                print("idx_with_Anomaly_1: ", idx_with_Anomaly_1)
+                print("idx_with_Anomaly_2: ", idx_with_Anomaly_2)
+                print("feature_names 1: ", feature_names[idx_with_Anomaly_1])
+                print("feature_names 2: ", feature_names[idx_with_Anomaly_2])
+                print("eval_results_over_all_dimensions 1: ",
+                      eval_results_over_all_dimensions[example_idx, :reconstructed_input.shape[1]][23])
+                print("eval_results_over_all_dimensions 2: ",
+                      eval_results_over_all_dimensions[example_idx, reconstructed_input.shape[1]:][23])
+
+            # Get ordered and combined dictonary of anomalous data streams
+            anomalies_combined_asc_ordered = order_anomalies(count_dim_anomalies_1, count_dim_anomalies_2,
+                                                             idx_with_Anomaly_1, idx_with_Anomaly_2, feature_names)
+            anomaly_detected = False
+
+            # store information
+            # print("anomalies_combined_asc_ordered : ",anomalies_combined_asc_ordered)
+            # print("np.where(np.in1d(anomalies_combined_asc_ordered, feature_names))[0] : ", np.where(np.in1d(anomalies_combined_asc_ordered, feature_names))[0] )
+            store_relevant_attribut_idx[example_idx] = np.where(np.in1d(anomalies_combined_asc_ordered, feature_names))[
+                0]  # np.argsort(-anomalous_attributes_dims_per_example)
+            store_relevant_attribut_dis[example_idx] = anomalous_attributes_dims_per_example[example_idx]
+            store_relevant_attribut_name[example_idx] = anomalies_combined_asc_ordered
+
+            # Decide which condition / criterium is used for detecting anomalies
+            if use_attribute_anomaly_as_condition:
+                # A feature is seen as anomalous if row and column is higher than the threshold value
+                if (feature_names[idx_with_Anomaly_1].shape[0] + feature_names[idx_with_Anomaly_2].shape[
+                    0]) > 1:  # 0 if any occurend, 1 if double occurence (horizontal and vertical)
+                    anomaly_detected = True
+            else:
+                # A feature is seen as anomalous if the mse of its reconstruction is higher than the threshold
+                if (mse_values[example_idx] > mse_threshold):
+                    anomaly_detected = True
+
+            if anomaly_detected:
+                y_pred_ano[example_idx] = 1
+                if labels is not None:
+                    if labels[example_idx] == 'no_failure':
+                        FN_NF += 1
+                        FP_F += 1
+                    else:
+                        TN_NF += 1
+                        TP_F += 1
+            else:
+                # No Anomaly detected
+                y_pred_ano[example_idx] = 0
+                if labels is not None:
+                    if labels[example_idx] == 'no_failure':
+                        TP_NF += 1
+                        TN_F += 1
+                    else:
+                        FP_NF += 1
+                        FN_F += 1
+
+            # Print output for each example
+            if labels is not None:
+                '''
+                print(labels[example_idx],": ", mse_values[example_idx], " idx_with_Anomaly_1:  ", feature_names[idx_with_Anomaly_1],
+                      " with counts: ", count_dim_anomalies_1,"idx_with_Anomaly_2: ", feature_names[idx_with_Anomaly_2],
+                      " with counts: ", count_dim_anomalies_2)
+                 '''
+                if print_all_examples:
+                    print("Label: ", labels[example_idx], " -  Detected Anomaly: ", anomaly_detected,
+                          " based on: MSE:  %.8f" % mse_values[example_idx], "Anomalies combined: ",
+                          anomalies_combined_asc_ordered)
+            else:
+                '''
+                print("NoFailure: ", " idx_with_Anomaly_1:  ", feature_names[idx_with_Anomaly_1], " with counts: ",
+                      count_dim_anomalies_1, feature_names[idx_with_Anomaly_2], " with counts: ",
+                      count_dim_anomalies_2)
+                '''
+                if print_all_examples:
+                    print("Label: no_failure (validation) -  Detected Anomaly: ", anomaly_detected,
+                          " based on: MSE:  %.8f" % mse_values[example_idx], "Anomalies combined: ",
+                          anomalies_combined_asc_ordered)
+
+        avgpr_w, avgpr_m, pr_auc_valid_knn = calculate_PRCurve(labels, mse_values)
+
+        y_pred = np.where(anomalous_attributes_dims_per_example >= 2, 1, 0)
+        y_true = np.where(labels == 'no_failure', 0, 1)
+        roc_auc_wie_eval_w, roc_auc_wie_eval_m = calculate_RocAuc(y_true, y_pred_ano)
+        roc_auc_wie_eval_w_2, roc_auc_wie_eval_m_2 = calculate_RocAuc(y_true, y_pred)
+        print(" +++ +++ +++ +++ +++ FINAL EVAL TEST +++ +++ +++ +++ +++ +++ +++")
+        print("")
+        print(classification_report(y_true, y_pred_ano, target_names=['normal', 'anomaly'], digits=4))
+        print("ROCAUC wie verwendet: ", roc_auc_wie_eval_w)
+        print("ROCAUC wie verwendet: ", roc_auc_wie_eval_w_2)
+
+        # return f1_A, roc_auc_mse_w, roc_auc_attri_count_w, roc_auc_attri_dims_count_w
+        return [store_relevant_attribut_idx, store_relevant_attribut_dis, store_relevant_attribut_name, y_pred]
 
 # Not used anymore
 def plot_heatmap_of_reconstruction_error(input, output, rec_error_matrix, id, dim):
@@ -291,9 +1161,9 @@ def plot_heatmap_of_reconstruction_error(input, output, rec_error_matrix, id, di
     print("plot_heatmap_of_reconstruction_error")
 
 # Generates a heat map of the reconstruction error and shows the real input and its reconstruction
-def plot_heatmap_of_reconstruction_error2(input, output, rec_error_matrix, id):
+def plot_heatmap_of_reconstruction_error2(input, output, rec_error_matrix, id, y_label=""):
     #print("example id: ", id)
-    fig, axs = plt.subplots(3,8, gridspec_kw = {'wspace':0.1, 'hspace':-0.1})
+    fig, axs = plt.subplots(3,4, gridspec_kw = {'wspace':0.1, 'hspace':-0.1}) # rows/dim
     fig.suptitle('Reconstruction Error of '+str(id))
     fig.subplots_adjust(hspace=0, wspace=0)
     #print("input shape: ", input.shape)
@@ -308,7 +1178,7 @@ def plot_heatmap_of_reconstruction_error2(input, output, rec_error_matrix, id):
     width = 0.15  # * 4 = 0.6 - minus the 0.1 padding 0.3 left for space
     left1, left2, left3, left4 = 0.05, 0.25, 1 - 0.25 - width, 1 - 0.05 - width
 
-    for dim in range(8):
+    for dim in range(config.dim_of_dataset):
         #print("dim: ", dim)
         axs[0,dim].imshow(input[:,:,dim], cmap='hot', interpolation='nearest')
         #cax = plt.axes([0.95, 0.05, 0.05, 0.9])
@@ -330,7 +1200,7 @@ def plot_heatmap_of_reconstruction_error2(input, output, rec_error_matrix, id):
         #axs[2, dim].set_aspect('equal')
         plt.subplots_adjust(hspace=.001)
     #plt.imshow(rec_error_matrix, cmap='hot', interpolation='nearest')
-    filename="heatmaps3/" +str(id)+"-"+"rec_error_matrix.png"
+    filename="heatmaps/" +str(id)+"-"+"rec_error_matrix_"+y_label+".png"
     #print("filename: ", filename)
     fig.tight_layout(pad=0.1, h_pad=0.01)
     #fig.subplots_adjust(wspace=1.1,hspace=-0.1)
@@ -338,6 +1208,38 @@ def plot_heatmap_of_reconstruction_error2(input, output, rec_error_matrix, id):
     plt.savefig(filename, dpi=500)
     plt.clf()
     #print("plot_heatmap_of_reconstruction_error")
+
+def plotHistogram(anomaly_scores, labels, filename="plotHistogramWithMissingFilename.png", min=-1, max=1, num_of_bins=100):
+    # divide examples in normal and anomalous
+    font = {'family': 'serif','size': 14}
+    plt.rc('font', **font)
+
+    # Get idx of examples with this label
+    example_idx_of_no_failure_label = np.where(labels == 'no_failure')
+    example_idx_of_opposite_labels = np.squeeze(np.array(np.where(labels != 'no_failure')))
+    #feature_data = np.expand_dims(feature_data, -1)
+    anomaly_scores_normal = anomaly_scores[example_idx_of_no_failure_label[0]]
+    anomaly_scores_unnormal = anomaly_scores[example_idx_of_opposite_labels[0]]
+
+    bins = np.linspace(min, max, num_of_bins)
+    bins2 = np.linspace(min, max, 10)
+    plt.clf()
+    plt.hist(anomaly_scores_normal, bins, alpha=0.5, label='normal')
+    plt.hist(anomaly_scores_unnormal, bins2, alpha=0.5, label='unnormal')
+    plt.legend(loc='upper right')
+    plt.savefig(filename) #pyplot.show()
+
+def remove_failure_examples(lables, feature_data, label_to_retain="no_failure"):
+    # Input labels as strings with size (e,1) and feature data with size (e, d)
+    # where e is the number of examples and d the number of feature dimensions
+    # Return both inputs without any labels beside the label given via parameter label_to_retain
+
+    # Get idx of examples with this label
+    example_idx_of_curr_label = np.where(lables == label_to_retain)
+    #feature_data = np.expand_dims(feature_data, -1)
+    feature_data = feature_data[example_idx_of_curr_label[0],:]
+    lables = lables[example_idx_of_curr_label]
+    return lables, feature_data
 
 # Loss Function that receives an external matrix where relevant correlations are defined manually (based on domain
 # knowledge)
@@ -364,10 +1266,10 @@ def mscred_loss_acc_paper(y_true, y_pred):
 
 def MseLoss(y_true, y_pred):
     loss = tf.square(y_true - y_pred)
-    print("MseLoss loss dim: ", loss.shape)
-    #loss = np.square(np.linalg.norm((y_true - y_pred[0]), ord='fro'))
-    #K.mean(math_ops.squared_difference(y_pred, y_true), axis=-1)
     loss = tf.reduce_mean(loss, axis=-1)
+    return loss  # Note the `axis=-1`
+def L2Loss(y_true, y_pred):
+    loss =  tf.reduce_mean(tf.square(y_true - y_pred), axis=-1)
     return loss  # Note the `axis=-1`
 
 def SimLoss(y_true, y_pred):
@@ -401,19 +1303,8 @@ def SimLoss(y_true, y_pred):
     #return tf.reduce_mean(loss, axis=-1)  # Note the `axis=-1`
 
 def MemEntropyLoss(y_true, y_pred):
-    mem_etrp = tf.reduce_sum((-y_pred) * tf.math.log(y_pred + 1e-12))
-    #print("mem_etrp shape: ", mem_etrp.shape)
-    loss = tf.reduce_mean(mem_etrp)
-    '''
-    mem_etrp_2 = tf.reduce_mean(y_pred, 0)
-    print("MemEntropyLoss mem_etrp_2 dim: ", mem_etrp_2.shape)
-    mem_etrp_2 = tf.reduce_sum((-mem_etrp_2) * tf.math.log(mem_etrp_2 + 1e-12))
-    mem_etrp_2 = 5 - mem_etrp_2
-    tf.print("mem_etrp_2:", mem_etrp_2)
-    mem_etrp_2 = tf.reduce_mean(y_pred)
-    print("MemEntropyLoss mem_etrp_2 dim: ", mem_etrp_2.shape)
-    print("MemEntropyLoss loss dim: ", loss.shape)
-    '''
+    # Loss fosters memory access to be 1 or 0
+    loss = tf.reduce_mean((-y_pred) * tf.math.log(y_pred + 1e-12), axis=-1)
     return loss
 
 def plot_training_process_history(history, curr_run_identifier):
@@ -454,6 +1345,120 @@ def order_anomalies(count_dim_anomalies_1, count_dim_anomalies_2,idx_with_Anomal
     #print("anomalies_combined_asc_ordered_flipped_dict: ", anomalies_combined_asc_ordered_flipped_dict)
     return anomalies_combined_asc_ordered_flipped_dict #dict(anomalies_combined_asc_ordered)
 
+# This function calculates the RocAuc Score when given a label list and a anomaly score per example
+def calculate_RocAuc(test_failure_labels_y, score_per_example):
+    if "no_failure" in test_failure_labels_y:
+        y_true = np.where(test_failure_labels_y == 'no_failure', 0, 1)
+    else:
+        y_true = test_failure_labels_y
+    #print("mse_per_example_test:", mse_per_example_test.shape)
+    score_per_example_test_normalized = (score_per_example - np.min(score_per_example)) / np.ptp(score_per_example)
+    roc_auc_score_value = roc_auc_score(y_true, score_per_example_test_normalized, average='weighted')
+    roc_auc_score_value_m = roc_auc_score(y_true, score_per_example_test_normalized, average='macro')
+    return roc_auc_score_value, roc_auc_score_value_m
+
+def calculate_PRCurve(test_failure_labels_y, score_per_example):
+    # Replace 'no_failure' string with 0 (for negative class) and failures (anomalies) with 1 (for positive class)
+    if "no_failure" in test_failure_labels_y:
+        y_true = np.where(test_failure_labels_y == 'no_failure', 0, 1)
+    else:
+        y_true = test_failure_labels_y
+    #print("y_true: ", y_true)
+    #print("y_true: ", y_true.shape)
+    #print("mse_per_example_test:", mse_per_example_test.shape)
+    score_per_example_test_normalized = (score_per_example - np.min(score_per_example)) / np.ptp(score_per_example)
+    avgP = average_precision_score(y_true, score_per_example_test_normalized, average='weighted')
+    avgP_m = average_precision_score(y_true, score_per_example_test_normalized, average='macro')
+    precision, recall, _ = precision_recall_curve(y_true, score_per_example_test_normalized)
+    auc_score = auc(recall, precision)
+    return avgP, avgP_m, auc_score
+
+class Batch():
+    def __init__(self, total, batch_size):
+        self.total = total
+        self.batch_size = batch_size
+        self.current = 0
+
+    def next(self):
+        max_index = self.current + self.batch_size
+        indices = [i if i < self.total else i - self.total
+                   for i in range(self.current, max_index)]
+        self.current = max_index % self.total
+        return indices
+# Returns a matrix of size (#test_examples,valid_examples) where each entry is the pairwise cosine similarity
+def get_Similarity_Matrix(valid_vector, test_vector):
+    from sklearn.metrics.pairwise import cosine_similarity
+    examples_matrix = np.concatenate((valid_vector, test_vector), axis=0)
+    pairwise_cosine_sim_matrix = cosine_similarity(examples_matrix)
+    print("pairwise_cosine_sim_matrix: ", pairwise_cosine_sim_matrix)
+    pairwise_cosine_sim_matrix = pairwise_cosine_sim_matrix[valid_vector.shape[0]:,:valid_vector.shape[0]]
+
+    return pairwise_cosine_sim_matrix
+
+def find_anomaly_threshold(nn_distance_valid, labels_valid):
+    # the threshold is optimized based on the given data set, typically the validation set
+    '''
+    print("nn_distance_valid shape: ", nn_distance_valid.shape)
+    print("nn_distance_valid: ", nn_distance_valid)
+    print("nn_distance_valid: ", nn_distance_valid)
+    print("labels_valid shape: ", labels_valid.shape)
+    threshold_min=np.amin(nn_distance_valid)
+    threshold_max= np.amax(nn_distance_valid)
+    curr_threshold = threshold_min
+    '''
+    # labels
+    y_true = np.where(labels_valid == 'no_failure', 0, 1)
+    y_true = np.reshape(y_true, y_true.shape[0])
+    #print("y_true shape: ", y_true.shape)
+
+    #sort all anomaly scores and iterate over them for finding the highest score
+    nn_distance_valid_sorted = np.sort(nn_distance_valid)
+    f1_weighted_max_threshold   = 0
+    f1_weighted_max_value       = 0
+    f1_macro_max_threshold      = 0
+    f1_macro_max_value          = 0
+    for curr_threshold in nn_distance_valid_sorted:
+        y_pred = np.where(nn_distance_valid <= curr_threshold, 1, 0)
+        #print(" ---- ")
+        #print("Threshold: ", curr_threshold)
+        #print(classification_report(y_true, y_pred, target_names=['normal', 'anomaly']))
+        TN, FP, FN, TP = confusion_matrix(y_true, y_pred).ravel()
+        p_r_f_s_weighted = precision_recall_fscore_support(y_true, y_pred, average='weighted')
+        p_r_f_s_macro = precision_recall_fscore_support(y_true, y_pred, average='macro')
+        # Sensitivity, hit rate, recall, or true positive rate
+        TPR = TP / (TP + FN)
+        # Specificity or true negative rate
+        TNR = TN / (TN + FP)
+        # Precision or positive predictive value
+        PPV = TP / (TP + FP)
+        # Negative predictive value
+        NPV = TN / (TN + FN)
+        # Fall out or false positive rate
+        FPR = FP / (FP + TN)
+        # False negative rate
+        FNR = FN / (TP + FN)
+        # False discovery rate
+        FDR = FP / (TP + FP)
+
+        # Overall accuracy
+        ACC = (TP + TN) / (TP + FP + FN + TN)
+        #print("precision_recall_fscore_support: ", precision_recall_fscore_support(y_true, y_pred, average='weighted'))
+        #print(" ---- ")
+        if f1_weighted_max_value < p_r_f_s_weighted[2]:
+            f1_weighted_max_value = p_r_f_s_weighted[2]
+            f1_weighted_max_threshold = curr_threshold
+        if f1_macro_max_value < p_r_f_s_weighted[2]:
+            f1_macro_max_value = p_r_f_s_macro[2]
+            f1_macro_max_threshold = curr_threshold
+    print(" ++++ ")
+    print(" Best Threshold on Validation Split Found:")
+    print(" F1 Score weighted: ", f1_weighted_max_value, "\t\t Threshold: ", f1_weighted_max_threshold)
+    print(" F1 Score macro: ", f1_macro_max_value, "\t\t\t Threshold: ", f1_macro_max_threshold)
+    print(" ++++ ")
+
+    return f1_weighted_max_threshold, f1_macro_max_threshold
+
+
 def main():
     # Configurations
     train_model = config.train_model
@@ -464,6 +1469,7 @@ def main():
     use_attention = config.use_attention
     use_convLSTM = config.use_convLSTM
     use_memory_restriction = config.use_memory_restriction
+    use_graph_conv = config.use_graph_conv
 
     use_loss_corr_rel_matrix = config.use_loss_corr_rel_matrix
     loss_use_batch_sim_siam = config.loss_use_batch_sim_siam
@@ -497,6 +1503,10 @@ def main():
     use_attribute_anomaly_as_condition_list = config.use_attribute_anomaly_as_condition_list
     use_dim_for_anomaly_detection = config.use_dim_for_anomaly_detection
 
+    use_MemEntropyLoss = config.use_MemEntropyLoss
+
+    printInfo = True
+
     print("### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ")
     print("curr_run_identifier: ", curr_run_identifier)
     print("train_model: ", config.train_model, ", test_model: ", config.test_model, ", data set version: ", config.use_data_set_version)
@@ -522,10 +1532,17 @@ def main():
     test_matrix_path = test_matrix_path
     test_labels_y_path = test_labels_y_path
     feature_names_path = config.feature_names_path
+    valid_matrix_path_wF = config.valid_matrix_path_wF
+    valid_labels_y_path_wF = config.valid_labels_y_path_wF
+
+    ### Load Adj Matrix
+    adj_matrix_attr_df = pd.read_csv(config.graph_adjacency_matrix_attributes_file, sep=';', index_col=0)
+    adj_mat = adj_matrix_attr_df.values.astype(dtype=np.float)
 
     ### Create MSCRED model as TF graph
     print("config.relevant_features: ", config.relevant_features)
-    test_failure_labels_y = np.load(test_labels_y_path)
+    test_labels_y = np.load(test_labels_y_path)
+    print("test_labels_y: ", test_labels_y)
     ### Load Correlation Relevance Matrix ###
     df_corr_rel_matrix = pd.read_csv('../data/Attribute_Correlation_Relevance_Matrix_v0.csv', sep=';',index_col=0)
     np_corr_rel_matrix = df_corr_rel_matrix.values
@@ -536,7 +1553,15 @@ def main():
     print('Creation of the model')
 
     # create graph structure of the NN
-    model_MSCRED = MSCRED().create_model(guassian_noise_stddev=guassian_noise_stddev,
+    print("Loaded AdjMat: ", adj_mat )
+    print("AdjMat shape: ", adj_mat.shape)
+    if use_graph_conv:
+        model_MSCRED = MSGCRED().create_model(guassian_noise_stddev=guassian_noise_stddev,
+                                             use_attention=use_attention, use_ConvLSTM=use_convLSTM,
+                                             use_memory_restriction=use_memory_restriction,
+                                             use_encoded_output=loss_use_batch_sim_siam, adj_mat = adj_mat)
+    else:
+        model_MSCRED = MSCRED().create_model(guassian_noise_stddev=guassian_noise_stddev,
                                          use_attention=use_attention, use_ConvLSTM=use_convLSTM,
                                          use_memory_restriction=use_memory_restriction, use_encoded_output=loss_use_batch_sim_siam)
     print(model_MSCRED.summary())
@@ -554,6 +1579,11 @@ def main():
 
         #  Loading the training data
         curr_xTrainData = np.load(training_data_set_path)
+        if config.use_data_set_version == 2022:
+            # change format from: (example_dim, 4, len(win_size), x_features.shape[2], x_features.shape[2]))
+            curr_xTrainData = np.transpose(curr_xTrainData, [0,1,3,4,2])
+            print("Training failure-free data swapped acc. old dimensional order (examples,lenght,sensor,sensor,dim")
+
         print("Loaded (failure-free training) data: ", curr_xTrainData.shape)
 
         #Remove irrelevant correlations
@@ -577,29 +1607,45 @@ def main():
 
         if use_memory_restriction:
             if use_loss_corr_rel_matrix:
-                model_MSCRED.compile(optimizer=opt,
-                                     loss=[corr_rel_matrix_weighted_loss(corr_rel_mat=np_corr_rel_matrix),
-                                           MemEntropyLoss],
-                                     loss_weights=[0.9998, 0.0002])
+                if use_MemEntropyLoss:
+                    model_MSCRED.compile(optimizer=opt,
+                                         loss=[corr_rel_matrix_weighted_loss(corr_rel_mat=np_corr_rel_matrix),
+                                               MemEntropyLoss],
+                                         loss_weights=[0.9998, 0.0002]) # [0.9998, 0.0002] # [0.99999999, 0.00000001]
+                else:
+                    model_MSCRED.compile(optimizer=opt,
+                                         loss=corr_rel_matrix_weighted_loss(corr_rel_mat=np_corr_rel_matrix))  # [0.9998, 0.0002]
             else:
-                model_MSCRED.compile(optimizer=opt, loss=[MseLoss, MemEntropyLoss],
-                                     loss_weights=[0.999998, 0.000002])
+                if use_MemEntropyLoss:
+                    model_MSCRED.compile(optimizer=opt, loss=[MseLoss, MemEntropyLoss], loss_weights=[0.9998, 0.0002]) # [0.9998, 0.0002]
+                else:
+                    model_MSCRED.compile(optimizer=opt, loss=MseLoss)  # [0.9998, 0.0002]
         elif use_loss_corr_rel_matrix:
             model_MSCRED.compile(optimizer=opt, loss=corr_rel_matrix_weighted_loss(corr_rel_mat=np_corr_rel_matrix))
         elif loss_use_batch_sim_siam:
-            model_MSCRED.compile(optimizer=opt, loss=[MseLoss, SimLoss],
-                                 loss_weights=[0.9, 0.1])
+            model_MSCRED.compile(optimizer=opt, loss=[MseLoss, SimLoss],loss_weights=[0.9, 0.1])
         else:
             model_MSCRED.compile(optimizer=opt, loss=tf.keras.losses.mse)
-        history = model_MSCRED.fit(X_train,X_train_y,epochs=epochs,batch_size=batch_size, shuffle=True, validation_split=0.1, callbacks=[es, mc, csv_logger])
+
+        # Adj Mat Test
+        if config.use_graph_conv == True:
+            adj_mat = np.ones((1000,3721,3721))
+            print("adj_mat shape: ", adj_mat)
+            history = model_MSCRED.fit([X_train[:1000,:,:,:],adj_mat],X_train_y[:1000,:,:,:],epochs=epochs,batch_size=batch_size, shuffle=True, validation_split=0.1, callbacks=[es, mc, csv_logger])
+        else:
+            history = model_MSCRED.fit(X_train, X_train_y, epochs=epochs, batch_size=batch_size, shuffle=True, validation_split=0.1, callbacks=[es, mc, csv_logger])
         plot_training_process_history(history=history, curr_run_identifier=curr_run_identifier)
 
     ### Test ###
     if test_model:
+        f1_all_list = []
+        rocauc_mse_all_list = []
+        rocauc_attr_all_list = []
+        rocauc_attrDim_all_list = []
         #Load previous trained model
         if use_memory_restriction or loss_use_batch_sim_siam:
             model_MSCRED = tf.keras.models.load_model('best_model_' + curr_run_identifier + '.h5', custom_objects={
-                'loss': corr_rel_matrix_weighted_loss(corr_rel_mat=np_corr_rel_matrix), 'Memory': Memory}, compile=False)
+                'loss': corr_rel_matrix_weighted_loss(corr_rel_mat=np_corr_rel_matrix), 'Memory': Memory,'Memory2': Memory2}, compile=False)
         else:
             model_MSCRED = tf.keras.models.load_model('best_model_'+curr_run_identifier+'.h5', custom_objects={'loss': corr_rel_matrix_weighted_loss(corr_rel_mat=np_corr_rel_matrix), 'Memory': Memory})
 
@@ -607,14 +1653,28 @@ def main():
 
         # Load validation split of the training data (used for defining the anomaly thresholds)
         X_valid = np.load(valid_split_save_path)
+
+        # Load data with failures
+        X_valid_wF = np.load(valid_matrix_path_wF)
+        if config.use_data_set_version == 2022:
+            X_valid_wF = np.transpose(X_valid_wF, [0, 1, 3, 4, 2])
+        valid_labels_y = np.load(valid_labels_y_path_wF)
+
         # Remove irrelevant correlations
         X_valid = apply_corr_rel_matrix_on_input(use_corr_rel_matrix_for_input,
                                                          use_corr_rel_matrix_for_input_replace_by_epsilon,
                                                          X_valid, np_corr_rel_matrix)
+        X_valid_wF = apply_corr_rel_matrix_on_input(use_corr_rel_matrix_for_input,
+                                                 use_corr_rel_matrix_for_input_replace_by_epsilon,
+                                                 X_valid_wF, np_corr_rel_matrix)
+
         X_valid_y = X_valid[:, step_size - 1, :, :, :]
+        X_valid_wF_y = X_valid_wF[:, step_size - 1, :, :, :]
 
         # Load test data (as used in PredM Siamese NN)
         X_test = np.load(test_matrix_path)
+        if config.use_data_set_version == 2022:
+            X_test = np.transpose(X_test, [0, 1, 3, 4, 2])
         X_test = apply_corr_rel_matrix_on_input(use_corr_rel_matrix_for_input,
                                                  use_corr_rel_matrix_for_input_replace_by_epsilon,
                                                  X_test, np_corr_rel_matrix)
@@ -622,19 +1682,84 @@ def main():
 
         # Load failure examples of the training data (failure examples excluded from the training) for further evaluation?
 
-        print("Validation split: ", X_valid.shape, "Test data:", X_test.shape)
+        print("Validation split: ", X_valid.shape,"Validation split with Failure: ", X_valid_wF.shape, "Test data:", X_test.shape)
 
         # Reconstruct loaded input data
         print("Data for evaluation loaded  ... start with reconstruction ...")
         if loss_use_batch_sim_siam or use_memory_restriction:
-            X_valid_recon = model_MSCRED.predict(X_valid, batch_size=128)[0]
+            #b = Batch(51, 97)
+            b = Batch(23, 99)
+            for i in range(23):
+                if i == 0:
+                    if use_MemEntropyLoss:
+                        output = model_MSCRED.predict(X_valid[b.next(), :, :, :, :])
+                        X_valid_recon = output[0]
+                        X_valid_memAccess = output[1]
+                    else:
+                        X_valid_recon = model_MSCRED.predict(X_valid[b.next(), :, :, :, :])
+                else:
+                    if use_MemEntropyLoss:
+                        #X_valid_recon = np.concatenate((X_valid_recon, model_MSCRED.predict(X_valid[b.next(),:,:,:,:])[0]), axis=0)
+                        output = model_MSCRED.predict(X_valid[b.next(),:,:,:,:])
+                        X_valid_recon = np.concatenate((X_valid_recon, output[0]), axis=0)
+                        X_valid_memAccess = np.concatenate((X_valid_memAccess, output[1]), axis=0)
+                    else:
+                        X_valid_recon = np.concatenate((X_valid_recon, model_MSCRED.predict(X_valid[b.next(), :, :, :, :])), axis=0)
+                #X_valid_recon = model_MSCRED.predict(X_valid[b.next(),:,:,:,:])[0]
+            #X_valid_recon = model_MSCRED.predict(X_valid, batch_size=128)[0]
         else:
             X_valid_recon = model_MSCRED.predict(X_valid, batch_size=128)
         print("Reconstruction of validation data set done with shape :", X_valid_recon.shape) #((9, 61, 61, 3))
         if loss_use_batch_sim_siam or use_memory_restriction:
-            output = model_MSCRED.predict(X_test, batch_size=128)
-            X_test_recon = output[0]
-            X_test_memAccess = output[1]
+            #b = Batch(51, 97)
+            b = Batch(3, 127)
+            for i in range(3):
+                if i == 0:
+                    if use_MemEntropyLoss:
+                        output = model_MSCRED.predict(X_valid_wF[b.next(), :, :, :, :])
+                        X_valid_recon_wf = output[0]
+                        X_valid_memAccess = output[1]
+                    else:
+                        X_valid_recon_wf = model_MSCRED.predict(X_valid_wF[b.next(), :, :, :, :])
+                else:
+                    if use_MemEntropyLoss:
+                        #X_valid_recon = np.concatenate((X_valid_recon, model_MSCRED.predict(X_valid[b.next(),:,:,:,:])[0]), axis=0)
+                        output = model_MSCRED.predict(X_valid_wF[b.next(),:,:,:,:])
+                        X_valid_recon_wf = np.concatenate((X_valid_recon_wf, output[0]), axis=0)
+                        X_valid_memAccess = np.concatenate((X_valid_memAccess, output[1]), axis=0)
+                    else:
+                        X_valid_recon_wf = np.concatenate((X_valid_recon_wf, model_MSCRED.predict(X_valid[b.next(), :, :, :, :])), axis=0)
+                #X_valid_recon = model_MSCRED.predict(X_valid[b.next(),:,:,:,:])[0]
+            #X_valid_recon = model_MSCRED.predict(X_valid, batch_size=128)[0]
+        else:
+            X_valid_recon_wf = model_MSCRED.predict(X_valid_wF, batch_size=128)
+        print("Reconstruction of validation data with Failures set done with shape :", X_valid_recon_wf.shape) #((9, 61, 61, 3))
+        if loss_use_batch_sim_siam or use_memory_restriction:
+            #b = Batch(44, 149) # https://www.matheretter.de/rechner/primzahltest
+            b = Batch(28, 121) # https://www.matheretter.de/rechner/primzahltest
+            for i in range(28):
+                if i == 0:
+                    if use_MemEntropyLoss:
+                        output = model_MSCRED.predict(X_test[b.next(), :, :, :, :])
+                        X_test_recon = output[0]
+                        X_test_memAccess = output[1]
+
+                    else:
+                        output = model_MSCRED.predict(X_test[b.next(), :, :, :, :])
+                        X_test_recon = output
+                else:
+                    if use_MemEntropyLoss:
+                        output = model_MSCRED.predict(X_test[b.next(), :, :, :, :])
+                        X_test_recon = np.concatenate((X_test_recon, output[0]), axis=0)
+                        X_test_memAccess = np.concatenate((X_test_memAccess, output[1]), axis=0)
+                    else:
+                        output = model_MSCRED.predict(X_test[b.next(), :, :, :, :])
+                        X_test_recon = np.concatenate((X_test_recon, output), axis=0)
+            #output = model_MSCRED.predict(X_test[:128,:,:,:,:], batch_size=128)
+            #X_test_recon = output[0]
+            #X_test_memAccess = output[1]
+            print("X_test_recon shape:",X_test_recon.shape)
+            if use_MemEntropyLoss: print("X_test_memAccess shape: ", X_test_memAccess.shape)
         else:
             X_test_recon = model_MSCRED.predict(X_test, batch_size=128)
         print("Reconstruction of test data set done with shape :", X_test_recon.shape)  # ((9, 61, 61, 3))
@@ -645,21 +1770,39 @@ def main():
             layer_name = 'Reshape_ToOrignal_ConvLSTM_4'
             intermediate_layer_model = tf.keras.Model(inputs=model_MSCRED.input,
                                                    outputs=model_MSCRED.get_layer(layer_name).output)
-            encoded_output = intermediate_layer_model.predict(X_test, batch_size=128)
-            print("Encoded_output shape: ", encoded_output.shape)
-            np.save('encoded_test.npy', encoded_output)
+            encoded_output_test = intermediate_layer_model.predict(X_test, batch_size=128)
+            encoded_output_valid_wf = intermediate_layer_model.predict(X_valid_wF, batch_size=128)
+            print("Encoded_output_valid_wf shape:", encoded_output_valid_wf.shape,"Encoded_output_test shape:", encoded_output_test.shape)
+            np.save('encoded_test.npy', encoded_output_test)
+            np.save('encoded_output_valid_wf.npy', encoded_output_valid_wf)
 
         feature_names = np.load(feature_names_path)
 
         # Remove any dimension with size of 1
         X_valid_y = np.squeeze(X_valid_y)
+        X_valid_wF_y = np.squeeze(X_valid_wF_y)
         X_test_y = np.squeeze(X_test_y)
+
+        '''
+        x = get_Similarity_Matrix(X_valid_memAccess, X_test_memAccess)
+        print(x)
+        print(x.shape)
+        x_ = np.mean(x, axis=1)
+        print(x_)
+        print(x_.shape)
+        cosine_sim_mean_norm = (x_ - np.min(x_)) / np.ptp(x_)
+        y_true = pd.factorize(test_failure_labels_y)[0].tolist()
+        y_true = np.where(np.asarray(y_true) > 1, 1,0)
+        score = roc_auc_score(y_true, cosine_sim_mean_norm)
+        print("Roc-Auc_score based on cosine sim betw. valid of memory access: ", score)
+        '''
 
         if use_mass_evaulation:
 
             test_configurations = list(zip(threshold_selection_criterium_list, num_of_dim_over_threshold_list,
                                            num_of_dim_under_threshold_list, use_corr_rel_matrix_in_eval_list, use_attribute_anomaly_as_condition_list))
-            for i in range(len(test_configurations)):
+            #for i in range(len(test_configurations)):
+            for i in range(1):
                 threshold_selection_criterium, num_of_dim_over_threshold, num_of_dim_under_threshold, use_corr_rel_matrix_in_eval,\
                 use_attribute_anomaly_as_condition = test_configurations[i][0], test_configurations[i][1], test_configurations[i][2], test_configurations[i][3], test_configurations[i][4]
                 print("threshold_selection_criterium: ", threshold_selection_criterium, " with: ",num_of_dim_over_threshold,"/",num_of_dim_under_threshold, ". CorrMatrix: ", use_corr_rel_matrix_in_eval,"Anomaly based on Attributes: ", use_attribute_anomaly_as_condition)
@@ -669,33 +1812,168 @@ def main():
                     real_input=X_valid_y, reconstructed_input=X_valid_recon, plot_heatmaps=plot_heatmap_of_rec_error,
                     use_corr_rel_matrix=use_corr_rel_matrix_in_eval, corr_rel_matrix=np_corr_rel_matrix)
 
+
+                ### Calcuation of reconstruction error on the validation data set with Failures###
+                recon_err_matrixes_valid_wf, recon_err_perAttrib_valid_wf, mse_per_example_valid_wf, mse_per_example_per_dims_wf = calculateReconstructionError(
+                    real_input=X_valid_wF_y, reconstructed_input=X_valid_recon_wf, plot_heatmaps=plot_heatmap_of_rec_error,
+                    use_corr_rel_matrix=use_corr_rel_matrix_in_eval, corr_rel_matrix=np_corr_rel_matrix)
+                print("recon_err_matrixes_valid_wf:", recon_err_matrixes_valid_wf.shape,"recon_err_perAttrib_valid_wf:", recon_err_perAttrib_valid_wf.shape,"mse_per_example_valid_wf:",mse_per_example_valid_wf.shape ,"mse_per_example_per_dims_wf:", mse_per_example_per_dims_wf.shape)
+                # recon_err_matrixes_valid_wf: (381, 61, 61, 4) recon_err_perAttrib_valid_wf: (381, 122, 4) mse_per_example_valid_wf: (381,) mse_per_example_per_dims_wf: (381, 4)
+
+                print("X_test_y shape:",X_test_y.shape,"X_test_recon shape:",X_test_recon.shape)
                 ### Calcuation of reconstruction error on the test data set ###
                 recon_err_matrixes_test, recon_err_perAttrib_test, mse_per_example_test, mse_per_example_per_dims = calculateReconstructionError(
                     real_input=X_test_y, reconstructed_input=X_test_recon, plot_heatmaps=plot_heatmap_of_rec_error,
-                    use_corr_rel_matrix=use_corr_rel_matrix_in_eval, corr_rel_matrix=np_corr_rel_matrix)
+                    use_corr_rel_matrix=use_corr_rel_matrix_in_eval, corr_rel_matrix=np_corr_rel_matrix, y_labels=test_labels_y)
 
                 # Define Thresholds for each dimension and attribute
+                #''' # Only faultfree data and a fixed threshold selection criterium is used
                 thresholds, mse_threshold = calculateThreshold(reconstructed_input=X_valid_recon,recon_err_perAttrib_valid=recon_err_perAttrib_valid,
                                                                        threshold_selection_criterium=threshold_selection_criterium, mse_per_example=mse_per_example_valid,
                                                                print_pandas_statistics_for_validation=print_pandas_statistics_for_validation, feature_names=feature_names)
+                print("thresholds",thresholds.shape, "mse_threshold:",mse_threshold.shape)
+                print("calculateThreshold with X_valid_recon: mse_threshold:", mse_threshold, "thresholds:", thresholds,)
+                # thresholds (4, 122) mse_threshold: (1,)
+                #'''
+                #'''
+                scaler_dict = {}
+
+                for dim in range(recon_err_matrixes_valid.shape[3]):
+                    # makes mean to zero and std to 1 for each attribute.
+                    recon_err_matrixes_valid_ = np.reshape(recon_err_matrixes_valid,(recon_err_matrixes_valid.shape[0], recon_err_matrixes_valid.shape[1] * recon_err_matrixes_valid.shape[2], recon_err_matrixes_valid.shape[3]))
+                    #scaler = preprocessing.StandardScaler().fit(recon_err_matrixes_valid_[:, :, dim])
+                    scaler = preprocessing.Normalizer().fit(recon_err_matrixes_valid_[:, :, dim])
+
+                    # Process Validation data ...
+                    recon_err_matrixes_valid_wf_ = np.reshape(recon_err_matrixes_valid_wf,(recon_err_matrixes_valid_wf.shape[0], recon_err_matrixes_valid_wf.shape[1] * recon_err_matrixes_valid_wf.shape[2],recon_err_matrixes_valid_wf.shape[3]))
+                    recon_err_matrixes_valid_wf_scaled = scaler.transform(recon_err_matrixes_valid_wf_[:, :, dim])
+                    recon_err_matrixes_valid_wf_ = np.reshape(recon_err_matrixes_valid_wf_scaled, (recon_err_matrixes_valid_wf.shape[0], recon_err_matrixes_valid_wf.shape[1], recon_err_matrixes_valid_wf.shape[2]))
+                    recon_err_matrixes_valid_wf[:, :, :, dim] = recon_err_matrixes_valid_wf_
+
+                    # Process test data ...
+                    recon_err_matrixes_test_ = np.reshape(recon_err_matrixes_test, (
+                    recon_err_matrixes_test.shape[0],
+                    recon_err_matrixes_test.shape[1] * recon_err_matrixes_test.shape[2],
+                    recon_err_matrixes_test.shape[3]))
+                    recon_err_matrixes_test_scaled = scaler.transform(recon_err_matrixes_test_[:, :, dim])
+                    recon_err_matrixes_test_ = np.reshape(recon_err_matrixes_test_scaled, (
+                    recon_err_matrixes_test.shape[0], recon_err_matrixes_test.shape[1],
+                    recon_err_matrixes_test.shape[2]))
+                    recon_err_matrixes_test[:, :, :, dim] = recon_err_matrixes_test_
+                    #recon_err_perAttrib_valid_scaled = np.squeeze(recon_err_perAttrib_valid_scaled)
+                    # print("data_curr_dim shape: ", data_curr_dim.shape)
+                    #recon_err_perAttrib_valid_scaled = pd.DataFrame(recon_err_perAttrib_valid_scaled)
+                    #print(recon_err_perAttrib_valid_scaled.describe().loc['mean', :].values)
+                    #print(recon_err_perAttrib_valid_scaled.describe().loc['std', :].values)
+                    scaler_dict[dim] = scaler
+                #'''
+
+                #scale attributewise
+                recon_err_matrixes_valid_axis1 = recon_err_matrixes_valid.copy()
+                recon_err_matrixes_valid_axis2 = recon_err_matrixes_valid.copy()
+                recon_err_matrixes_valid_wf_axis1 = recon_err_matrixes_valid_wf.copy()
+                recon_err_matrixes_valid_wf_axis2 = recon_err_matrixes_valid_wf.copy()
+                recon_err_matrixes_test_axis1 = recon_err_matrixes_test.copy()
+                recon_err_matrixes_test_axis2 = recon_err_matrixes_test.copy()
+                for dim in range(recon_err_matrixes_valid.shape[3]):
+                    for att in range(recon_err_matrixes_valid.shape[2]):
+                        recon_err_matrixes_valid_dim_att = recon_err_matrixes_valid_axis1[:, att,:, dim]
+                        #print("recon_err_matrixes_valid_dim_att shape:",recon_err_matrixes_valid_dim_att.shape)
+                        recon_err_matrixes_valid_dim_att = np.squeeze(recon_err_matrixes_valid_dim_att) # to get (examples,features)
+                        #print("recon_err_matrixes_valid_dim_att shape:", recon_err_matrixes_valid_dim_att.shape)
+                        scaler = preprocessing.Normalizer().fit(recon_err_matrixes_valid_dim_att)
+                        recon_err_matrixes_valid_dim_att_scaled = scaler.transform(recon_err_matrixes_valid_dim_att)
+                        recon_err_matrixes_valid_axis1[:, att,:, dim] = recon_err_matrixes_valid_dim_att_scaled
+
+                        # Process Validation data ...
+                        recon_err_matrixes_valid_wf_dim_att = recon_err_matrixes_valid_wf_axis1[:, att, :, dim]
+                        recon_err_matrixes_valid_wf_dim_att_scaled = scaler.transform(recon_err_matrixes_valid_wf_dim_att)
+                        recon_err_matrixes_valid_wf_axis1[:, att, :, dim] = recon_err_matrixes_valid_wf_dim_att_scaled
+
+                        # Process test data ...
+                        recon_err_matrixes_test_dim_att = recon_err_matrixes_test_axis1[:, att, :, dim]
+                        recon_err_matrixes_test_dim_att_scaled = scaler.transform(recon_err_matrixes_test_dim_att)
+                        recon_err_matrixes_test_axis1[:, att, :, dim] = recon_err_matrixes_test_dim_att_scaled
+
+                    for att in range(recon_err_matrixes_valid.shape[2]):
+                        recon_err_matrixes_valid_dim_att = recon_err_matrixes_valid_axis2[:, :,att, dim]
+                        #print("recon_err_matrixes_valid_dim_att shape:",recon_err_matrixes_valid_dim_att.shape)
+                        recon_err_matrixes_valid_dim_att = np.squeeze(recon_err_matrixes_valid_dim_att) # to get (examples,features)
+                        #print("recon_err_matrixes_valid_dim_att shape:", recon_err_matrixes_valid_dim_att.shape)
+                        scaler = preprocessing.Normalizer().fit(recon_err_matrixes_valid_dim_att)
+                        recon_err_matrixes_valid_dim_att_scaled = scaler.transform(recon_err_matrixes_valid_dim_att)
+                        recon_err_matrixes_valid_axis2[:, :,att, dim] = recon_err_matrixes_valid_dim_att_scaled
+
+                        # Process Validation data ...
+                        recon_err_matrixes_valid_wf_dim_att = recon_err_matrixes_valid_wf_axis2[:, :, att, dim]
+                        recon_err_matrixes_valid_wf_dim_att_scaled = scaler.transform(recon_err_matrixes_valid_wf_dim_att)
+                        recon_err_matrixes_valid_wf_axis2[:, :, att, dim] = recon_err_matrixes_valid_wf_dim_att_scaled
+
+                        # Process test data ...
+                        recon_err_matrixes_test_dim_att = recon_err_matrixes_test_axis2[:, :, att, dim]
+                        recon_err_matrixes_test_dim_att_scaled = scaler.transform(recon_err_matrixes_test_dim_att)
+                        recon_err_matrixes_test_axis2[:, :, att, dim] = recon_err_matrixes_test_dim_att_scaled
+
+                # f1_weighted_max_threshold, [f1_weighted_max_threshold_per_dim, best_dim], [f1_weighted_max_threshold_per_dim_attr,best_dim_attr], thresholds
+                f1_weighted_max_threshold, f1_weighted_max_threshold_per_dim, f1_weighted_max_threshold_per_dim_attr, thresholds_percentil  = calculateThresholdWithLabels(reconstructed_input=X_valid_recon_wf,recon_err_perAttrib_valid=recon_err_perAttrib_valid_wf, labels_valid=valid_labels_y,
+                                                                       mse_per_example=mse_per_example_valid_wf, print_pandas_statistics_for_validation=print_pandas_statistics_for_validation, feature_names=feature_names,
+                                                                       mse_per_example_per_dims_wf=mse_per_example_per_dims_wf,scaler_dict=scaler_dict)
+                print("thresholds_percentil", thresholds_percentil.shape, "f1_weighted_max_threshold:", f1_weighted_max_threshold.shape)
+                print("calculateThresholdWithLabels with X_valid_recon_wf: f1_weighted_max_threshold:", f1_weighted_max_threshold, "thresholds_percentil:", thresholds_percentil)
+
+                #anomaly_score_per_example_test, best_threshold_tau = calculateThresholdWithLabelsAsMSCRED(residual_matrix=recon_err_matrixes_valid_wf, labels_valid=valid_labels_y,residual_matrix_test=recon_err_matrixes_test, residual_matrix_wo_FaF=recon_err_matrixes_valid, attr_names=feature_names)
+
+                anomaly_score_per_example_test, best_threshold_tau = calculateThresholdWithLabelsAsMSCRED_Scaled(residual_matrix_scaled=recon_err_matrixes_valid_wf, residual_matrix_scaled_axis1=recon_err_matrixes_valid_wf_axis1, residual_matrix_scaled_axis2=recon_err_matrixes_valid_wf_axis2,
+                                                                                                                 labels_valid=valid_labels_y,residual_matrix_test=recon_err_matrixes_test, residual_matrix_wo_FaF=recon_err_matrixes_valid, attr_names=feature_names,
+                                                                                                                 residual_matrix_test_axis1=recon_err_matrixes_test_axis1,residual_matrix_test_axis2=recon_err_matrixes_test_axis2)
+                print("anomaly_score_per_example_test shape: ", anomaly_score_per_example_test.shape,
+                      "test_labels_y shape:", test_labels_y.shape)
+
+                prec_rec_fscore_support_, y_pred_ = evaluate(anomaly_score_per_example_test, test_labels_y, best_threshold_tau, average='weighted')
+                print(sdssd)
+
+                prec_rec_fscore_support, y_pred = evaluate(mse_per_example_test, test_labels_y, f1_weighted_max_threshold, average='weighted')
+
 
                 # Evaluate
-                eval_results, eval_results_over_all_dimensions, eval_results_over_all_dimensions_for_each_example = calculateAnomalies(reconstructed_input=X_valid_recon, recon_err_perAttrib=recon_err_perAttrib_valid, thresholds=thresholds, print_att_dim_statistics = print_att_dim_statistics, use_dim_for_anomaly_detection=use_dim_for_anomaly_detection)
+                thresholds = thresholds_percentil
+                mse_threshold = f1_weighted_max_threshold
+                #eval_results, eval_results_over_all_dimensions, eval_results_over_all_dimensions_for_each_example = calculateAnomalies(reconstructed_input=X_valid_recon, recon_err_perAttrib=recon_err_perAttrib_valid, thresholds=thresholds, print_att_dim_statistics = print_att_dim_statistics, use_dim_for_anomaly_detection=use_dim_for_anomaly_detection)
                 eval_results_f, eval_results_over_all_dimensions_f, eval_results_over_all_dimensions_for_each_example_f = calculateAnomalies(reconstructed_input=X_test_recon, recon_err_perAttrib=recon_err_perAttrib_test, thresholds=thresholds, print_att_dim_statistics = print_att_dim_statistics, use_dim_for_anomaly_detection=use_dim_for_anomaly_detection)
 
                 # Get Positions of anomalies
 
 
                 print("#### Evaluate No-FAILURES / Validation data set #####")
+                '''
                 printEvaluation2(reconstructed_input=X_valid_recon, eval_results_over_all_dimensions=eval_results_over_all_dimensions, feature_names=feature_names,
                                 num_of_dim_under_threshold=num_of_dim_under_threshold, num_of_dim_over_threshold=num_of_dim_over_threshold,
                                  mse_threshold=mse_threshold, mse_values=mse_per_example_valid, use_attribute_anomaly_as_condition=use_attribute_anomaly_as_condition,
                                  print_all_examples=print_all_examples)
+                '''
                 print("#### Evaluate No-FAILURES and FAILURES / Test data set #####")
-                printEvaluation2(reconstructed_input=X_test_recon, eval_results_over_all_dimensions=eval_results_over_all_dimensions_f, feature_names=feature_names, labels = test_failure_labels_y,
+                relevant_information_for_eval = printEvaluation2(reconstructed_input=X_test_recon, eval_results_over_all_dimensions=eval_results_over_all_dimensions_f, feature_names=feature_names, labels = test_labels_y,
                                 num_of_dim_under_threshold=num_of_dim_under_threshold, num_of_dim_over_threshold=num_of_dim_over_threshold,
                                  mse_threshold=mse_threshold, mse_values=mse_per_example_test, use_attribute_anomaly_as_condition=use_attribute_anomaly_as_condition,
                                  print_all_examples=print_all_examples)
+
+                # Store information for further evaluation
+                import pickle
+                a_file = open('store_relevant_attribut_idx_'+config.curr_run_identifier+'.pkl', "wb")
+                pickle.dump(relevant_information_for_eval[0], a_file)
+                a_file.close()
+                a_file = open('store_relevant_attribut_dis_'+config.curr_run_identifier+'.pkl', "wb")
+                pickle.dump(relevant_information_for_eval[1], a_file)
+                a_file.close()
+                a_file = open('store_relevant_attribut_name_'+config.curr_run_identifier+'.pkl', "wb")
+                pickle.dump(relevant_information_for_eval[2], a_file)
+                a_file.close()
+                np.save('predicted_anomalies' + config.curr_run_identifier + '.npy', y_pred_)
+
+                f1_all_list.append(prec_rec_fscore_support[2])
+                #rocauc_mse_all_list.append(roc_auc_mse)
+                #rocauc_attr_all_list.append(roc_auc_attri_count)
+                #rocauc_attrDim_all_list.append(roc_auc_attri_dims_count)
         else:
             ### Calcuation of reconstruction error on the validation data set ###
             recon_err_matrixes_valid, recon_err_perAttrib_valid, mse_per_example_valid, mse_per_example_per_dims = calculateReconstructionError(
@@ -737,27 +2015,30 @@ def main():
             print("#### Evaluate No-FAILURES and FAILURES / Test data set #####")
             printEvaluation2(reconstructed_input=X_test_recon,
                              eval_results_over_all_dimensions=eval_results_over_all_dimensions_f,
-                             feature_names=feature_names, labels=test_failure_labels_y,
+                             feature_names=feature_names, labels=test_labels_y,
                              num_of_dim_under_threshold=num_of_dim_under_threshold,
                              num_of_dim_over_threshold=num_of_dim_over_threshold,
                              mse_threshold=mse_threshold, mse_values=mse_per_example_test,
                              use_attribute_anomaly_as_condition=use_attribute_anomaly_as_condition,
                              print_all_examples=print_all_examples)
-
+        print("mse_per_example_test: ", mse_per_example_test)
         # ROC-AUC
-        y_true = pd.factorize(test_failure_labels_y)[0].tolist()
+        y_true = pd.factorize(test_labels_y)[0].tolist()
         y_true = np.where(np.asarray(y_true) > 1, 1,0)
-        print("y_true: ", y_true)
-        print("y_true: ", y_true.shape)
-        print("mse_per_example_test:", mse_per_example_test.shape)
+        if config.use_memory_restriction:
+            y_true = y_true[:-1]
+        #print("y_true: ", y_true)
+        #print("y_true: ", y_true.shape)
+        #print("mse_per_example_test:", mse_per_example_test.shape)
         mse_per_example_test_normalized = (mse_per_example_test - np.min(mse_per_example_test)) / np.ptp(mse_per_example_test)
         score = roc_auc_score(y_true, mse_per_example_test_normalized)
-        print("Roc-Auc_Score: ", score)
+        print("Roc-Auc_Score: ", score, "vs.", calculate_RocAuc(test_labels_y, mse_per_example_test))
+        #print("F1_all_list: ",f1_all_list)
         fpr, tpr, thresholds = metrics.roc_curve(y_true, mse_per_example_test_normalized)
         #print("fpr: ", fpr)
         #print("tpr: ", tpr)
         #print("thresholds: ", thresholds)
-        if use_memory_restriction:
+        if use_memory_restriction & use_MemEntropyLoss & printInfo:
             print("X_test_memAccess shape: ", X_test_memAccess)
             print("X_test_memAccess shape: ", X_test_memAccess.shape)
             maxInRowsIndex = X_test_memAccess.argmax(axis=1)
@@ -765,7 +2046,7 @@ def main():
             print("max index:", maxInRowsIndex)
             print("max value:", maxInRowsValue)
 
-            split = np.split(X_test_memAccess, 100, axis=1)
+            split = np.split(X_test_memAccess, config.memory_size, axis=1)
             maxInRowsIndex = split[0].argmax(axis=1)
             maxInRowsValue = np.amax(split[0], axis=1)
             print("max index 0:", maxInRowsIndex)
@@ -776,10 +2057,12 @@ def main():
             print("max value 3:", maxInRowsValue)
 
             np.set_printoptions(threshold=sys.maxsize)
+
             print("X_test_memAccess[0,:]", X_test_memAccess[0,:])
             print("X_test_memAccess[100,:]", X_test_memAccess[100, :])
             print("X_test_memAccess[300,:]", X_test_memAccess[300, :])
             print("X_test_memAccess[500,:]", X_test_memAccess[500, :])
+
 
 
         #plot
@@ -795,6 +2078,11 @@ def main():
         plt.title('Receiver operating characteristic example')
         plt.legend(loc="lower right")
         plt.savefig('ROC_Curve_' + curr_run_identifier + '.png')
+
+        print("F1:",f1_all_list)
+        print("RocAuc MSE:",rocauc_mse_all_list)
+        print("RocAuc Attr:",rocauc_attr_all_list)
+        print("RocAuc AttrDim:",rocauc_attrDim_all_list)
 
 if __name__ == '__main__':
     main()

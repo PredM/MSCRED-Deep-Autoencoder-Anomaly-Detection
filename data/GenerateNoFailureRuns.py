@@ -17,9 +17,13 @@ def main():
     x_test_features = np.load("test_features.npy")  # data streams to for test a machine learning model
     y_test = np.load("test_labels.npy")  # labels of the training data
     '''
-    train_window_times = np.load("../../PredMSiamNN2/data/training_data/train_window_times.npy")  # labels of the training data
-    y_train = np.load("../../PredMSiamNN2/data/training_data/train_labels.npy")  # labels of the training data
-    x_train_features = np.load("../../PredMSiamNN2/data/training_data/train_features.npy")  # data streams to train a machine learning model
+    #train_window_times = np.load("../../PredMSiamNN2/data/training_data/train_window_times.npy")  # labels of the training data
+    train_window_times = np.load("../../../../data/pklein/PredMSiamNN/data/training_data/train_window_times_new2.npy")  # labels of the training data
+
+    #y_train = np.load("../../PredMSiamNN2/data/training_data/train_labels.npy")  # labels of the training data
+    y_train = np.load("../../../../data/pklein/PredMSiamNN/data/training_data/train_labels_new2.npy")  # labels of the training data
+    #x_train_features = np.load("../../PredMSiamNN2/data/training_data/train_features.npy")  # data streams to train a machine learning model
+    x_train_features = np.load("../../../../data/pklein/PredMSiamNN/data/training_data/train_features_new2.npy")  # data streams to train a machine learning model
 
     '''
     test_window_times = np.load("test_window_times.npy")  # labels of the training data
@@ -62,7 +66,7 @@ def main():
 
     # remove entries with failure
     train_data = np.delete(train_data, np.argwhere(train_data[:,2] != 'no_failure'),0)
-    print("Test", train_data.shape)
+    print("Shape", train_data.shape)
 
     # Find trajectories for training
     run_counter = 0
@@ -124,8 +128,8 @@ def main():
 
 
     # Print Save:
-    np.savez("NoFailure_Train_runs.npz",runs_x_features)
-    npzfile = np.load("NoFailure_Train_runs.npz")
+    np.savez("NoFailure_Train_runs_2022.npz",runs_x_features)
+    npzfile = np.load("NoFailure_Train_runs_2022.npz")
 
 
 if __name__ == '__main__':

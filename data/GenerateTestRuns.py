@@ -14,9 +14,15 @@ def main():
     # import data sets
     # 4 sec windows (overlapping) with 4ms sampling
 
-    test_window_times = np.load("../../PredMSiamNN2/data/training_data/test_window_times.npy")  # labels of the training data
-    y_test = np.load("../../PredMSiamNN2/data/training_data/test_labels.npy")  # labels of the training data
-    x_test_features = np.load("../../PredMSiamNN2/data/training_data/test_features.npy")  # data streams to train a machine learning model
+    #test_window_times = np.load("../../PredMSiamNN2/data/training_data/test_window_times.npy")  # labels of the training data
+    #y_test = np.load("../../PredMSiamNN2/data/training_data/test_labels.npy")  # labels of the training data
+    #x_test_features = np.load("../../PredMSiamNN2/data/training_data/test_features.npy")  # data streams to train a machine learning model
+    #test_window_times = np.load("../../../../data/pklein/PredMSiamNN/data/training_data/test_window_times.npy")  # labels of the training data
+    test_window_times = np.load("valid_window_times_new2.npy")  # labels of the training data
+    #y_test = np.load("../../../../data/pklein/PredMSiamNN/data/training_data/test_labels.npy")  # labels of the training data
+    y_test = np.load("valid_labels_new2.npy")  # labels of the training data
+    #x_test_features = np.load("../../../../data/pklein/PredMSiamNN/data/training_data/test_features.npy")  # data streams to train a machine learning model
+    x_test_features = np.load("valid_features_new2.npy")  # data streams to train a machine learning model
 
     print("Test window times shape: ", test_window_times.shape)
     print("Feature Window shape: ", x_test_features.shape)
@@ -61,14 +67,19 @@ def main():
     runs = []
     runFailureLabels = []
     runFailureTimes = []
+    print("Unique end dataes (=runs): ", len(np.unique(test_window_times[:,2])))
+    print("Unique end dataes (=runs): ", len(np.unique(test_window_times[:, 1])))
+    print("Unique end dataes (=runs): ", len(np.unique(test_window_times[:, 0])))
+    print("Unique end dataes (=runs): ", len(np.unique(train_data[:,1])))
     for entry in range(train_data.shape[0]):
         #print(train_data[entry,:])
         currEndDate = train_data[entry,1]
-        found = np.argwhere(train_data[:,0] == currEndDate)
-        #print("Found:",found, "enddate:", currEndDate)
-        if found.size == 0 and curr_run_instances > 4:
-            #print("new trajectory: ", curr_run_instances)
-            #print("indicies: ", curr_trjactory_indices)
+        found_instances_from_same_trajectory = np.argwhere(train_data[:,0] == currEndDate)
+        print("Found:",found_instances_from_same_trajectory, "with same enddate:", currEndDate)
+
+        if found_instances_from_same_trajectory.size == 0 and curr_run_instances >= 1:
+            print("new trajectory: ", curr_run_instances)
+            print("indicies: ", curr_trjactory_indices)
             runs.append(curr_trjactory_indices)
             run_counter = run_counter +1
             curr_run_instances = 0
@@ -76,7 +87,7 @@ def main():
             runFailureLabels.append(train_data[entry,2])
             runFailureTimes.append(train_data[entry,1])
         else:
-            #print(entry)
+            print(entry)
             curr_trjactory_indices.append(entry)
             curr_run_instances = curr_run_instances +1
 
@@ -114,8 +125,9 @@ def main():
 
 
     # Print Save:
-    np.savez("Test_runs.npz", runs_x_features)
-    npzfile = np.load("Test_runs.npz")
+    np.savez("Test_runs_2022.npz", runs_x_features)
+    print("runs_x_features len: ", len(runs_x_features))
+    npzfile = np.load("Test_runs_2022.npz")
 
 
 if __name__ == '__main__':

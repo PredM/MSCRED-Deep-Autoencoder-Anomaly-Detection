@@ -13,8 +13,8 @@ class Configuration:
         ###
         # General Configuration
         ###
-        self.curr_run_identifier = "model_48"
-        self.use_data_set_version = 1
+        self.curr_run_identifier = "FINAL_MSCRED_standard_MemRest"
+        self.use_data_set_version = 2022
         self.train_model = True
         self.test_model = True
 
@@ -23,16 +23,21 @@ class Configuration:
         ###
         # Variants of the MSCRED
         self.guassian_noise_stddev = None       # MSCRED default: None, None für nichts oder Wert: 0.1 / denoising autoencoder (Dropout zusätzlich ergänzt)
-        self.l1Reg = 0.0                       # MSCRED default: 0.0 , recommended: 0.001
+        self.l1Reg = 0.0                       # MSCRED default: 0.0 , not recommended: 0.001 (Leads to high loss for reconstruction)
         self.use_attention = True               # MSCRED default: True, Deaktivierung der Attention, erfordert ConvLSTM
-        self.keras_attention_layer_instead_of_own_impl = True  # MSCRED default: False, ansonsten andere Attention als im peper beschrieben
+        self.keras_attention_layer_instead_of_own_impl = False  # MSCRED default: False, ansonsten andere Attention als im peper beschrieben
         self.use_convLSTM = True                # MSCRED default: True, Deaktivierung des ConvLSTM und Attention mittels False
         self.use_memory_restriction = True     # MSCRED default: False, Restricts the output only on previously seen examples
+        self.use_MemEntropyLoss = False
+        self.use_filter_for_memory = False
+        self.use_graph_conv = False
+        self.normalize_residual_matrices = False     # Normalization of reconstruction error
 
-        self.use_loss_corr_rel_matrix = False   # MSCRED default: False, Reconstruction error is only based on correlations that are manually defined as relevant
+        self.use_loss_corr_rel_matrix = False   # MSCRED default: False, Reconstruction error loss is only based on correlations that are manually defined as relevant
         self.loss_use_batch_sim_siam = False    # MSCRED default: False,
         self.use_corr_rel_matrix_for_input = False  # MSCRED default: False,  input contains only relevant correlations, others set to zero
         self.use_corr_rel_matrix_for_input_replace_by_epsilon = False  # MSCRED default: False,  meaningful correlation that would be zero, are now near zero
+        self.use_corr_rel_matrix_on_masking_residual_matrices = False    # NOT USED; Masking out irrelevant correlations during the evaluation phase is already done with the activation of: use_loss_corr_rel_matrix
 
         # NN parameter
         self.num_datastreams = 61
@@ -47,26 +52,40 @@ class Configuration:
             self.dim_of_dataset = 4
         elif self.use_data_set_version == 5:
             self.dim_of_dataset = 4
+        elif self.use_data_set_version == 2022:
+            self.dim_of_dataset = 4
         #self.dim_of_dataset = 18  # 1: 8 2: 17 3:18
-        self.epochs = 100
+        self.epochs = 25
         self.learning_rate = 0.001
-        self.early_stopping_patience = 5
+        self.early_stopping_patience = 3
         self.split_train_test_ratio = 0.1
         self.use_strides = True
 
         if self.use_strides == True:
-            self.strides_encoder = [1, 2, 2, 2] #[1, 2, 2, 2]
-            self.dilation_encoder = [1, 1, 1, 1]
-            self.output_dim = [8, 16, 31, 61]   #dependent on strides
-            self.filter_dimension_encoder = [32, 64, 128, 256] #[32, 16, 8, 4] # [64, 32, 16, 8] # [32, 64, 128, 256]#[32, 64, 128, 256]  # [16, 8, 4, 1] [64, 128, 256, 512]  #  # [16, 32, 64, 128] #[32, 64, 128, 256] #[64, 128, 256, 512]
+            if self.use_graph_conv == True:
+                self.strides_encoder = [1, 1, 1, 1]  # [1, 2, 2, 2]
+                self.dilation_encoder = [1, 1, 1, 1]
+                self.output_dim = [61, 61, 61, 61]  # dependent on strides
+                self.filter_dimension_encoder = [16, 8, 4, 1]  # [32, 64, 128, 256] #[32, 16, 8, 4] # [64, 32, 16, 8] # [32, 64, 128, 256]#[32, 64, 128, 256]  # [16, 8, 4, 1] [64, 128, 256, 512]  #  # [16, 32, 64, 128] #[32, 64, 128, 256] #[64, 128, 256, 512]
+            else:
+                self.strides_encoder = [1, 2, 2, 2] #[1, 2, 2, 2]
+                self.dilation_encoder = [1, 1, 1, 1]
+                self.output_dim = [8, 16, 31, 61]  #[8, 16, 31, 61]    #dependent on strides
+                self.filter_dimension_encoder = [32, 64, 128, 256]# [32, 64, 128, 256] #[8, 16, 32, 64]  # [8, 16, 32, 64]#[32, 64, 128, 256] #[32, 16, 8, 4] # [64, 32, 16, 8] # [32, 64, 128, 256]#[32, 64, 128, 256]  # [16, 8, 4, 1] [64, 128, 256, 512]  #  # [16, 32, 64, 128] #[32, 64, 128, 256] #[64, 128, 256, 512]
         else:
+            self.dilation_encoder = [1, 1, 1, 1]
+            self.strides_encoder = [1, 2, 2, 2]
+            self.output_dim = [8, 16, 31, 61]
+            self.filter_dimension_encoder = [32, 64, 128, 256]
+            '''
             self.dilation_encoder = [1, 2, 2, 2]
             self.strides_encoder = [1, 1, 1, 1]
             self.output_dim = [61, 61, 61, 61]
             self.filter_dimension_encoder = [16, 8, 4, 1]
+            '''
 
         self.kernel_size_encoder = [3, 3, 2, 2] #[3, 3, 2, 2]
-        self.memory_size = 100
+        self.memory_size = 300
 
         ###
         # Test Evaluation
@@ -80,12 +99,13 @@ class Configuration:
         self.print_att_dim_statistics = False
         self.generate_deep_encodings = False
         self.plot_heatmap_of_rec_error = False
-        self.remove_hard_to_detect_stuff = ['low_wear']                         # not implemented
-        self.use_attribute_anomaly_as_condition = False                          # MSCRED default: True
-        self.print_all_examples = True
+        #self.remove_hard_to_detect_stuff = ['low_wear']                         # not implemented
+        self.use_attribute_anomaly_as_condition = True                          # MSCRED default: True
+        self.print_all_examples = False                                             # For inspection / debugging
 
         self.use_mass_evaulation = True
         # Mass evaluation parameters
+        # SINCE NEW IMPLEMENTATION NOT MORE CONSIDERED
         self.threshold_selection_criterium_list = ['99%', '99%', '99%', '99%', '97%', '97%', 'max', 'max', 'max', '90%', '90%', '97%', '97%']
         self.num_of_dim_over_threshold_list = [1, 1, 3, 3, 3, 3, 1, 1, 3, 1, 1, 1, 1]
         self.num_of_dim_under_threshold_list = [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20]
@@ -97,28 +117,30 @@ class Configuration:
         # Data Generation Configuration
         ###
         # maximum step in ConvLSTM
-        self.step_max = 5
+        self.step_max = 4 #5
         # gap time between each segment in time steps
         # self.gap_time = 125 #10#
-        self.gap_time = 250 #3/1: 125
+        self.gap_time = 250 #250 #3/1: 125
         # window size / length of each segment
         #1: self.win_size = [125, 250, 375, 500, 625, 750, 875, 1000]  # [10, 30, 60]#
         # self.win_size = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1250, 1500, 1750, 2000, 2500, 3000] #[10, 30, 60]#
         # self.win_size = [5, 10, 15, 20, 25, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130,140, 150, 175, 200, 225, 250,
         #                 275, 300, 325, 350, 375, 400, 425, 450, 475, 500, 550, 600, 650, 700, 750, 800, 850, 900, 950, 1000]
         #self.win_size = [5, 10, 15, 20, 25, 30, 40, 50, 60, 70, 80, 90, 100, 110, 125, 150, 200, 250]
-        self.win_size = [125, 250, 375, 500]
+        self.win_size = [63, 125, 188, 250]
 
         self.filename_matrix_data = "matrix_win_"
         self.step_size_reconstruction = 1
-        self.directoryname_matrix_data = "matrix_data_4"
+        self.directoryname_matrix_data = "matrix_data_5"
         self.replace_zeros_with_epsilion_in_matrix_generation = True
 
         ###
         # Data Set Configuration
         ###
         path = "../../../../data/pklein/MSCRED_Input_Data/"
+        #path = '../data/'
         self.path = path
+        self.graph_adjacency_matrix_attributes_file = path + "adjacency_matrix_v3_fullGraph_sparse.CSV"
         if self.use_data_set_version == 1:
             self.training_data_set_path = path + "training_data_set.npy"
             self.valid_split_save_path = path + "training_data_set_test_split.npy"
@@ -154,6 +176,13 @@ class Configuration:
             self.test_labels_y_path = path + "training_data_set_4_failure_labels.npy"
             self.test_matrix_path = path + "test_data_set_4_epsi.npy"
             self.test_labels_y_path = path + "test_data_set_4_failure_labels.npy"
+        elif self.use_data_set_version == 2022:
+            self.training_data_set_path = path + "sig_mat_train.npy"
+            self.valid_split_save_path = path + "training_data_set_test_split_2022.npy"
+            self.valid_matrix_path_wF = path + "sig_mat_valid.npy"
+            self.valid_labels_y_path_wF = path + "valid_labels.npy"
+            self.test_matrix_path = path + "sig_mat_test.npy"
+            self.test_labels_y_path = path + "test_labels.npy"
 
         self.feature_names_path = "../data/feature_names.npy"
 

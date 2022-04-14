@@ -73,7 +73,8 @@ def generate_signature_matrix_node(run, numOfRun):
 def main():
 
     # Import runs
-    npzfile = np.load(config.path + "Test_runs.npz", allow_pickle=True)
+    npzfile = np.load("Test_runs_2022.npz", allow_pickle=True)
+    #npzfile = np.load("Test_runs_2022.npz", allow_pickle=True)
     #print("npzfile: ", npzfile.files)
     TestRuns = npzfile['arr_0']
     print("TestRuns shape: ", TestRuns.shape)
