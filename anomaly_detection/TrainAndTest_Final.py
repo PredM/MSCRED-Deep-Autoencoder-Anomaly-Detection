@@ -1215,24 +1215,60 @@ def remove_failure_examples(lables, feature_data, label_to_retain="no_failure"):
 # Input: corr_rel_mat (Attributes,Attributes) with {0,1}
 def corr_rel_matrix_weighted_loss(corr_rel_mat):
     def loss(y_true, y_pred):
-        loss = tf.square(y_true - y_pred)
-        print("corr_rel_matrix_weighted_loss loss dim: ", loss.shape)
-        corr_rel_mat_reshaped = np.reshape(corr_rel_mat, (1, 1, 61, 61, 1)).astype(np.float32)
-        loss = loss * corr_rel_mat_reshaped
-        loss = tf.reduce_sum(loss, axis=-1)
-        loss = loss / np.sum(corr_rel_mat) # normalize by number of considered correlations
+        #loss = tf.square(y_true - y_pred)
+        #print("corr_rel_matrix_weighted_loss loss dim: ", loss.shape)
+        #corr_rel_mat_reshaped = np.reshape(corr_rel_mat, (1, 1, 61, 61, 1)).astype(np.float32)
+        #loss = loss * corr_rel_mat_reshaped
+        #loss = tf.reduce_sum(loss, axis=-1)
+        #loss = loss / np.sum(corr_rel_mat) # normalize by number of considered correlations
         #loss = tf.reduce_mean(loss, axis=-1)
+        #'''
+
+        # Reshape with batch dim None: https://stackoverflow.com/questions/36668542/flatten-batch-in-tensorflow
+        shape = y_true.get_shape().as_list()
+        dim = np.prod(shape[1:])
+        y_true = tf.reshape(y_true, [-1, dim])
+        y_pred = tf.reshape(y_pred, [-1, dim])
+
+        # MSCRED loss according to paper p. 1413, Eq. 6
+        d = tf.reduce_sum(tf.square(tf.abs(y_true - y_pred)), axis=1)
+        # To avoid NAN loss
+        dx = tf.sqrt(tf.maximum(d, 1e-9))
+        squarred_frobenius_norm_per_example = tf.square(dx)
+        loss = squarred_frobenius_norm_per_example
+
         return loss
     return loss  # Note the `axis=-1`
 
 # Loss function according to the MSCRED paper, but in the official impl. MSE is used
 def mscred_loss(y_true, y_pred):
+    shape = y_true.get_shape().as_list()
+    dim = np.prod(shape[1:])
+    y_true = tf.reshape(y_true, [-1, dim])
+    y_pred = tf.reshape(y_pred, [-1, dim])
+
     # MSCRED loss according to paper p. 1413, Eq. 6
+    d = tf.reduce_sum(tf.square(tf.abs(y_true - y_pred)), axis=1)
+
+    # To avoid NAN loss
+    dx = tf.sqrt(tf.maximum(d, 1e-9))
+    squarred_frobenius_norm_per_example = tf.square(dx)
+    loss = squarred_frobenius_norm_per_example
+
+    # verfiy forbenius norm implementation
+    #a = np.array([[1, 3, -1], [0, 1, 5], [1, -4, 1]])
+    #a_ = np.square(np.linalg.norm((a), ord='fro'))
+    #a__ = np.square(np.sqrt(np.sum(np.square(np.abs(a)))))
+    #print("a_:", a_,"a__:",a__)
+
+    # MSCRED loss according to paper p. 1413, Eq. 6 (Numpy version)
+    '''
     y_true = np.reshape(y_true, (y_true.shape[0], y_true.shape[1] * y_true.shape[2] * y_true.shape[3]))
     y_pred = np.reshape(y_pred, (y_pred.shape[0], y_pred.shape[1] * y_pred.shape[2] * y_pred.shape[3]))
     squarred_frobenius_norm = np.square(np.linalg.norm((y_true - y_pred), ord='fro'),axis=1)
     # mean for all signature matrices in batch
     loss = np.mean(squarred_frobenius_norm)
+    '''
     return loss
 
 def MseLoss(y_true, y_pred):
@@ -1619,7 +1655,7 @@ def main(run=""):
         elif loss_use_batch_sim_siam:
             model_MSCRED.compile(optimizer=opt, loss=[mscred_loss, SimLoss],loss_weights=[0.9, 0.1])
         else:
-            model_MSCRED.compile(optimizer=opt, loss=tf.keras.losses.mse)
+            model_MSCRED.compile(optimizer=opt, loss=mscred_loss)
 
         # Adj Mat Test
         if config.use_graph_conv == True:

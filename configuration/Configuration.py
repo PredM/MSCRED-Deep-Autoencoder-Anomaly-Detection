@@ -13,7 +13,7 @@ class Configuration:
         ###
         # General Configuration
         ###
-        self.curr_run_identifier = "FINAL_MSCRED_standard_MemRest"
+        self.curr_run_identifier = "FINAL_FINAL_MSCRED_Standard"
         self.use_data_set_version = 2022
         self.train_model = True
         self.test_model = True
@@ -27,7 +27,7 @@ class Configuration:
         self.use_attention = True               # MSCRED default: True, Deaktivierung der Attention, erfordert ConvLSTM
         self.keras_attention_layer_instead_of_own_impl = False  # MSCRED default: False, ansonsten andere Attention als im peper beschrieben
         self.use_convLSTM = True                # MSCRED default: True, Deaktivierung des ConvLSTM und Attention mittels False
-        self.use_memory_restriction = True     # MSCRED default: False, Restricts the output only on previously seen examples
+        self.use_memory_restriction = False     # MSCRED default: False, Restricts the output only on previously seen examples
         self.use_MemEntropyLoss = False
         self.use_filter_for_memory = False
         self.use_graph_conv = False
