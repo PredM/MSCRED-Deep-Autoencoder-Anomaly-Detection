@@ -1284,7 +1284,7 @@ def corr_rel_matrix_weighted_loss(corr_rel_mat):
         corr_rel_mat_reshaped = tf.expand_dims(tf.expand_dims(corr_rel_mat_reshaped, 0), 0)
         print("corr_rel_matrix_weighted_loss loss dim: ", corr_rel_mat_reshaped.shape)
         '''
-        corr_rel_mat_reshaped = tf.reshape(corr_rel_mat,(1, 1, 61, 61, 1))
+        corr_rel_mat_reshaped = tf.reshape(corr_rel_mat,(1, 1, config.num_datastreams, config.num_datastreams, 1))
         a = y_true - y_pred
         a = a * tf.cast(corr_rel_mat_reshaped, tf.float32)
         # Reshape with batch dim None: https://stackoverflow.com/questions/36668542/flatten-batch-in-tensorflow
@@ -1475,7 +1475,7 @@ def apply_corr_rel_matrix_on_input(use_corr_rel_matrix_for_input, use_corr_rel_m
             input_data[input_data == 0] = tf.keras.backend.epsilon()
             print("Finished replacing 0 values by epsilon  from the input")
         print("Start removing irrelevant correlations from the input")
-        np_corr_rel_matrix_reshaped = np.reshape(np_corr_rel_matrix, (1, 1, 61, 61, 1))
+        np_corr_rel_matrix_reshaped = np.reshape(np_corr_rel_matrix, (1, 1, config.num_datastreams, config.num_datastreams, 1))
         input_data = input_data * np_corr_rel_matrix_reshaped
         print("Finished removing irrelevant correlations from the input")
     return input_data
@@ -1528,7 +1528,7 @@ def apply_corr_rel_matrix_on_residual_matrix(use_corr_rel_matrix_for_input_repla
     print("input_data shape: ", input_data.shape)
     if use_corr_rel_matrix_for_input_replace_by_epsilon:
         input_data[input_data == 0] = tf.keras.backend.epsilon()
-    np_corr_rel_matrix_reshaped = np.reshape(np_corr_rel_matrix, (1, 61, 61, 1))
+    np_corr_rel_matrix_reshaped = np.reshape(np_corr_rel_matrix, (1, config.num_datastreams, config.num_datastreams, 1))
     input_data = input_data * np_corr_rel_matrix_reshaped
     print("input_data shape after: ", input_data.shape)
     np.any(np.isnan(input_data))
@@ -1789,7 +1789,7 @@ def main(run="", val_split_rate=1.0):
 
         #  Loading the training data
         curr_xTrainData = np.load(training_data_set_path)
-        if config.use_data_set_version == 2022:
+        if config.use_data_set_version in [2022,2022_2]:
             # change format from: (example_dim, 4, len(win_size), x_features.shape[2], x_features.shape[2]))
             curr_xTrainData = np.transpose(curr_xTrainData, [0,1,3,4,2])
             print("Training failure-free data swapped acc. old dimensional order (examples,lenght,sensor,sensor,dim")
@@ -1866,7 +1866,7 @@ def main(run="", val_split_rate=1.0):
 
         # Load data with failures
         X_valid_wF = np.load(valid_matrix_path_wF)
-        if config.use_data_set_version == 2022:
+        if config.use_data_set_version in [2022,2022_2]:
             X_valid_wF = np.transpose(X_valid_wF, [0, 1, 3, 4, 2])
         valid_labels_y = np.load(valid_labels_y_path_wF,allow_pickle=True)
 
@@ -1911,7 +1911,7 @@ def main(run="", val_split_rate=1.0):
 
         # Load test data (as used in PredM Siamese NN)
         X_test = np.load(test_matrix_path)
-        if config.use_data_set_version == 2022:
+        if config.use_data_set_version in [2022,2022_2]:
             X_test = np.transpose(X_test, [0, 1, 3, 4, 2])
         X_test = apply_corr_rel_matrix_on_input(use_corr_rel_matrix_for_input,
                                                  use_corr_rel_matrix_for_input_replace_by_epsilon,
@@ -1925,7 +1925,7 @@ def main(run="", val_split_rate=1.0):
             train_labels_y_wF = np.load(train_labels_y_path_wF)
             # Remove any dimension with size of 1
             train_labels_y_wF = np.squeeze(train_labels_y_wF)
-            if config.use_data_set_version == 2022:
+            if config.use_data_set_version in [2022,2022_2]:
                 X_train_wF = np.transpose(X_train_wF, [0, 1, 3, 4, 2])
             print("train_labels_y_wF:", train_labels_y_wF.shape, "X_train_wF shape: ", X_train_wF.shape)
             X_train_wF = apply_corr_rel_matrix_on_input(use_corr_rel_matrix_for_input,
@@ -2047,7 +2047,7 @@ def main(run="", val_split_rate=1.0):
             # Load train data
             #  Loading the training data
             curr_xTrainData = np.load(training_data_set_path)
-            if config.use_data_set_version == 2022:
+            if config.use_data_set_version in [2022,2022_2]:
                 # change format from: (example_dim, 4, len(win_size), x_features.shape[2], x_features.shape[2]))
                 curr_xTrainData = np.transpose(curr_xTrainData, [0, 1, 3, 4, 2])
                 print("Training failure-free data swapped acc. old dimensional order (examples,lenght,sensor,sensor,dim")

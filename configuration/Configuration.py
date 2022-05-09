@@ -13,12 +13,12 @@ class Configuration:
         ###
         # General Configuration
         ###
-        self.curr_run_identifier = "Fin_Standard_wAdjMat_newAdj_2_fixed" #Fin_Standard_wAdjMat_newAdj_2 #"Fin_Standard_wAdjMat_newAdj_2_wAdjMatwFM_"#"Fin_Standard_wAdjMat_newAdj_2_wAdjMatShuffled"
-        self.use_data_set_version = 2022
+        self.curr_run_identifier = "Fin_DS_MANW_2022_wAdjMat_" #Fin_Standard_wAdjMat_newAdj_2 #"Fin_Standard_wAdjMat_newAdj_2_wAdjMatwFM_"#"Fin_Standard_wAdjMat_newAdj_2_wAdjMatShuffled"
+        self.use_data_set_version = 2022_2
         self.train_model = True
         self.test_model = True
         self.save_results_as_file = True
-        self.use_train_FaF_in_eval = True
+        self.use_train_FaF_in_eval = False
 
         ###
         # Autoencoder Configuration
@@ -127,7 +127,7 @@ class Configuration:
         ###
         # maximum step in ConvLSTM
         if self.use_data_set_version == 2022_2:
-            self.step_max = 3 #5
+            self.step_max = 4 #5
         else:
             self.step_max = 4  # 5
         # gap time between each segment in time steps
