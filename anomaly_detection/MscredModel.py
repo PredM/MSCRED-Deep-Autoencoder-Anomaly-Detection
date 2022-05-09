@@ -64,9 +64,10 @@ class MSCRED(tf.keras.Model):
         conv2d_trans_layer3 = tf.keras.layers.Conv2DTranspose(filters=config.filter_dimension_encoder[1], strides=config.strides_encoder[2],
                                                               kernel_size=config.kernel_size_encoder[2], padding='same',
                                                               activation='selu', output_padding=1)
+        op = 1 if config.use_data_set_version == 2022_2 else 0
         conv2d_trans_layer2 = tf.keras.layers.Conv2DTranspose(filters=config.filter_dimension_encoder[0], strides=config.strides_encoder[1],
                                                               kernel_size=config.kernel_size_encoder[1], padding='same',
-                                                              activation='selu', output_padding=0)
+                                                              activation='selu', output_padding=op)
         conv2d_trans_layer1 = tf.keras.layers.Conv2DTranspose(filters=config.dim_of_dataset, strides=config.strides_encoder[0],
                                                               kernel_size=config.kernel_size_encoder[0], padding='same',
                                                               activation='selu')
@@ -364,14 +365,14 @@ class Memory2(tf.keras.layers.Layer):
 
         return w
     def call(self, input_):
-        tf.print("Memory Input shape: ", tf.shape(input_))
-        tf.print("self.memory_storage: shape: ", tf.shape(self.memory_storage))
+        #tf.print("Memory Input shape: ", tf.shape(input_))
+        #tf.print("self.memory_storage: shape: ", tf.shape(self.memory_storage))
         #input_ = tf.keras.layers.Dropout(rate=0.3)(input_)
         num = tf.linalg.matmul(input_, tf.transpose(self.memory_storage), name='attention_num')
         denom = tf.linalg.matmul(input_ ** 2, tf.transpose(self.memory_storage) ** 2, name='attention_denum')
 
-        tf.print("num shape: ", tf.shape(num))
-        tf.print("denom shape: ", tf.shape(denom))
+        #tf.print("num shape: ", tf.shape(num))
+        #tf.print("denom shape: ", tf.shape(denom))
         
         w = (num + 1e-12) / (denom + 1e-12)
 
@@ -403,10 +404,11 @@ class Memory2(tf.keras.layers.Layer):
         '''
         attentiton_w = tf.nn.softmax(w) # Eq.4
 
-        tf.print("attentiton_w: shape: ", tf.shape(attentiton_w))
-        tf.print("attentiton_w: ", attentiton_w)
+        #tf.print("attentiton_w: shape: ", tf.shape(attentiton_w))
+        #tf.print("attentiton_w: ", attentiton_w)
         max_idx = tf.math.argmax(attentiton_w, axis=1, output_type=tf.dtypes.int64, name=None)
-        tf.print("max_idx shape:",tf.shape(max_idx), "max_idx: ", max_idx)
+        #tf.print("max_idx shape:",tf.shape(max_idx), "max_idx: ", max_idx)
+        #tf.print("max_idx: ", max_idx, summarize=-1)
         #tf.print("value: ",attentiton_w[:,max_idx])
 
         # Hard Shrinkage for Sparse Addressing
@@ -421,6 +423,7 @@ class Memory2(tf.keras.layers.Layer):
         # Set any values less 1e-12 or above  1-(1e-12) to these values
         w_hat = tf.clip_by_value(memory_addr, 1e-12, 1-(1e-12))
         #w_hat = memory_addr / tf.linalg.normalize(memory_addr,ord=1,axis=0) # written in text after Eq. 7
+        # what shape: (Batchsize, memory Size)
         # Eq. 3:
         z_hat = tf.linalg.matmul(w_hat, self.memory_storage)
         #tf.print("z_hat shape: ", tf.shape(z_hat))
@@ -431,7 +434,41 @@ class Memory2(tf.keras.layers.Layer):
         #tf.print("w_hat shape ", w_hat.shape)
         #flatten = tf.keras.layers.Flatten()
         #w_hat = flatten(w_hat)
+        #tf.print("w_hat: ",w_hat, summarize=-1)
         #tf.print("w_hat shape flatten", w_hat.shape)
+
+        ###
+        # MEASURING VARIABILITY OF MEMORY ENTRIES:
+        #tf.print("self.memory_storage.shape: ", self.memory_storage.shape)
+        z_a_l2_norm = tf.math.l2_normalize(self.memory_storage, axis=0)
+        z_b_l2_norm = tf.math.l2_normalize(self.memory_storage, axis=1)
+        std_axis_0 = tf.math.reduce_std(z_a_l2_norm, 0)
+        std_axis_1 = tf.math.reduce_std(z_b_l2_norm, 1)
+        std_axis_0_mean = tf.math.reduce_mean(std_axis_0)
+        std_axis_1_mean = tf.math.reduce_mean(std_axis_1)
+        #tf.print("std_axis_0 shape: ", std_axis_0.shape)
+        #tf.print("std_axis_1 shape: ", std_axis_1.shape)
+        #tf.print("std_axis_0_mean: ", std_axis_0_mean)
+        #tf. print("std_axis_1_mean: ", std_axis_1_mean)
+        #tf.print("1/sqrt(d): ", (1/(tf.sqrt(10.0))))
+        #tf.print("1/sqrt(d): ", (1 / (tf.sqrt(tf.cast(self.memory_storage.shape[1], tf.float32)))))
+
+        ##tf.print("axis_0:", std_axis_0_mean-(1/(tf.sqrt(10.0))),"axis_1:",std_axis_1_mean-(1 / (tf.sqrt(tf.cast(self.memory_storage.shape[1], tf.float32)))))
+
+        # Batch mean
+        o_z = tf.reduce_mean(z_a_l2_norm, axis=0)
+        o_z = tf.expand_dims(o_z, 0)
+        o_z_tiled = tf.tile(o_z, [z_a_l2_norm.shape[0],1])
+        #tf.print("o_z_tiled shape: ", o_z_tiled.shape)
+        mse = tf.keras.losses.MeanSquaredError()
+
+        # a_e = tf.reduce_mean(tf.squared_difference(recon_a, e))
+        # b_f = tf.reduce_mean(tf.squared_difference(recon_b, f))
+        center_loss = mse(z_a_l2_norm, o_z_tiled)
+        ##tf.print("center loss: ", center_loss)
+
+        ###
+
         return z_hat, w_hat
 
     def get_config(self):
@@ -475,8 +512,7 @@ class Memory(tf.keras.layers.Layer):
         denom = tf.linalg.matmul(input_ ** 2, tf.transpose(self.memory_storage) ** 2, name='attention_denum')
         '''
         num = tf.linalg.matmul(input_, tf.transpose(self.memory_storage, perm=[0, 1, 3, 2]), name='attention_num')
-        denom = tf.linalg.matmul(input_ ** 2, tf.transpose(self.memory_storage, perm=[0, 1, 3, 2]) ** 2,
-                                 name='attention_denum')
+        denom = tf.linalg.matmul(input_ ** 2, tf.transpose(self.memory_storage, perm=[0, 1, 3, 2]) ** 2, name='attention_denum')
 
         w = (num + 1e-12) / (denom + 1e-12)
         # tf.print("Cosine Sim Matrix w: ", tf.shape(w))

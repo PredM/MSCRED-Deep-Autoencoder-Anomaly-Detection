@@ -90,37 +90,45 @@ def generate_signature_matrix_node(run, numOfRun):
 
 # import every pkl file of the normalised data
 def main():
+    import pickle
 
+    a_file = open("../../../../data/pklein/Datensatz2/training_data/raw_data/aux_df_test.pkl", "rb")
+    y_labels = pickle.load(a_file)
+    a_file.close()
+    print("y_labels: ", y_labels['label'].values)
+
+    y_labels = y_labels['label'].values
+    np.save(config.path + '/test_labels.npy', y_labels, )
+
+    y_labels = np.load(config.path + '/test_labels.npy',allow_pickle=True)
+    print("y_labels: ", y_labels)
+    print("where no_failure: ", len(np.argwhere(y_labels != 'no_failure')))
+    print(sds)
     # Import examples
-    y_labels = np.load("../../../../data/pklein/PredMSiamNN/data/training_data/train_labels_new2.npy")  # labels of the training data
+    #y_labels = np.load("../../../../data/pklein/PredMSiamNN/data/training_data/valid_labels_new2.npy")  # labels of the training data
+    #y_labels = np.load("../../../../data/pklein/Datensatz2/training_data/raw_data/x_train_val.npy")  # labels of the training data
 
-    x_features = np.load("../../../../data/pklein/PredMSiamNN/data/training_data/train_features_new2.npy")  # data streams to train a machine learning model
+    #x_features = np.load("../../../../data/pklein/PredMSiamNN/data/training_data/valid_features_new2.npy")  # data streams to train a machine learning model
+    x_features = np.load("../../../../data/pklein/Datensatz2/training_data/raw_data/x_test.npy")  # data streams to train a machine learning model
     print("y_labels shape: ", y_labels.shape)
     print("x_features shape: ", x_features.shape)
-    #TestRuns.shape[0]
-    arr_index = np.where(y_labels != 'no_failure',1,0)
-    arr_index2 = np.argwhere(y_labels != 'no_failure')
-    print(arr_index2)
-    num_of_no_failure_examples = np.sum(arr_index)
-    example_dim = num_of_no_failure_examples #x_features.shape[0]
-    print("sum:", np.sum(arr_index))
-    print("y_labels[arr_index]:",y_labels[arr_index2])
-    failure_labels = y_labels[arr_index2]
+
+    example_dim = x_features.shape[0]
+
     generated_example = np.zeros((example_dim,4,len(win_size), x_features.shape[2], x_features.shape[2]))
     #Shape (training samples, #sigmatrixes, windows, sensors, sensors)
     cnt=0
     for i in range(x_features.shape[0]): #TestRuns.shape[0]-50
         print(i,"-", y_labels[i])
         print('-----------------------------------')
-        if not y_labels[i] == "no_failure":
-            sig_mat = generate_signature_matrix_node(run=x_features[i], numOfRun=i)
-            print(i,"- sig_mat: ", sig_mat.shape)
-            generated_example[cnt, :,:,:,:] = sig_mat
-            cnt = cnt+1
+        #if not y_labels[i] == "no_failure":
+        sig_mat = generate_signature_matrix_node(run=x_features[i], numOfRun=i)
+        print(i,"- sig_mat: ", sig_mat.shape)
+        generated_example[cnt, :,:,:,:] = sig_mat
+        cnt = cnt+1
         print('-----------------------------------')
         print()
-    np.save(config.path + 'sig_mat_train_failures4Test.npy', generated_example)
-    np.save(config.path + 'sig_mat_train_failures4Test_labels.npy',failure_labels)
+    np.save(config.path + 'sig_mat_test.npy', generated_example)
 
 if __name__ == '__main__':
     main()

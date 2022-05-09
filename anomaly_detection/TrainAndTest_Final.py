@@ -1,6 +1,8 @@
 import os
 import sys
 import tensorflow as tf
+gpus = tf.config.list_physical_devices('GPU')
+tf.config.experimental.set_memory_growth(gpus[0], True)
 import pandas as pd
 import sklearn.model_selection as model_selection
 import matplotlib.pyplot as plt
@@ -18,6 +20,9 @@ from sklearn.metrics import classification_report
 from sklearn.metrics import precision_recall_fscore_support
 from sklearn.metrics import confusion_matrix
 from sklearn import preprocessing
+import warnings
+warnings.filterwarnings('ignore')
+from sklearn.cluster import KMeans
 
 # TF and background relevant settings
 #tf.disable_v2_behavior()
@@ -75,7 +80,7 @@ def calculateThreshold(reconstructed_input, recon_err_perAttrib_valid, threshold
 
     return thresholds, mse_threshold
 
-def calculateThresholdWithLabelsAsMSCRED(residual_matrix, labels_valid, residual_matrix_test, residual_matrix_wo_FaF=None, attr_names=None,curr_run_identifier="", dict_results={}):
+def calculateThresholdWithLabelsAsMSCRED(residual_matrix, labels_valid, residual_matrix_test, residual_matrix_wo_FaF=None, attr_names=None,curr_run_identifier="", dict_results={}, trainFaFUsed=False):
     # Treshold calculation
 
     # Determine threshold θ empirically  Paper only states the following: (" ... the number of elements whose value is
@@ -99,8 +104,20 @@ def calculateThresholdWithLabelsAsMSCRED(residual_matrix, labels_valid, residual
         #Normalize the data
         #scaler = scaler_dict[dimension]
         #data_curr_dim = scaler.transform(data_curr_dim)
-        # Iterate over all occured residual values, using every 1000th entry
-        for curr_threshold in np.sort(data_curr_dim.flatten()[0::1000]):
+        #kmeans = KMeans(n_clusters=1000,n_init=1, max_iter=2, random_state=2022).fit(np.expand_dims(data_curr_dim.flatten(),-1))
+        #print("Num of entries in threshold array: ", data_curr_dim.flatten().shape[0])
+        #possible_thresholds = np.squeeze(kmeans.cluster_centers_)
+        possible_thresholds = np.sort(data_curr_dim.flatten()[0::config.threshold_step])
+        '''
+        min_rec_err = np.sort(data_curr_dim.flatten())[0]
+        max_rec_err = np.sort(data_curr_dim.flatten())[0]
+        # Iterate over all occurred residual values, using every i-th entry (since the amount of them ...)
+        roc_aucs_storred = np.zeros((10))
+        for iterations in range(50):
+            possible_thresholds = np.linspace(min_rec_err, max_rec_err, 5)
+            cnt=0
+        '''
+        for curr_threshold in possible_thresholds:
             # Define broken elements for every example:
             anomaly_score_per_example = np.zeros((num_examples))
             for example_idx in range(num_examples):
@@ -110,6 +127,7 @@ def calculateThresholdWithLabelsAsMSCRED(residual_matrix, labels_valid, residual
             # All data collected for current threshold ... do some evaluation with roc auc
             roc_auc_attri_dims_count_w, roc_auc_attri_dims_count_m = calculate_RocAuc(labels_valid, anomaly_score_per_example)
             avgpr_w, avgpr_m, pr_auc_valid = calculate_PRCurve(labels_valid, anomaly_score_per_example)
+            #roc_aucs_storred[cnt] = roc_auc_attri_dims_count_w
             #print("Dim:",dimension,"Thrs:", curr_threshold,"| roc-auc:",roc_auc_attri_dims_count_w,"| avgpr:",avgpr_w,"| pr_auc:",pr_auc_valid_knn)
             if highest_roc_auc_attri_dims_count_w < roc_auc_attri_dims_count_w:
                 highest_roc_auc_attri_dims_count_w = roc_auc_attri_dims_count_w
@@ -121,8 +139,16 @@ def calculateThresholdWithLabelsAsMSCRED(residual_matrix, labels_valid, residual
                 dict_results['roc_auc_valid'] = roc_auc_attri_dims_count_w
                 dict_results['avgpr_valid'] = avgpr_w
                 dict_results['pr_auc_valid'] = pr_auc_valid
-
-    print("Highest ROC AUC: ", highest_roc_auc_attri_dims_count_w, "at dim:",highest_dict["dim"],"with threshold:",highest_dict["threshold"] )
+        '''
+            cnt = cnt +1
+        min_rec_err = possible_thresholds[np.argsort(-roc_aucs_storred)[0]]
+        max_rec_err = possible_thresholds[np.argsort(-roc_aucs_storred)[0]]
+        if min_rec_err > max_rec_err:
+            tmp = max_rec_err
+            max_rec_err = min_rec_err
+            min_rec_err = tmp
+        '''
+    print("Highest ROC AUC: ", highest_roc_auc_attri_dims_count_w,"with PR Auc:", pr_auc_valid,"at dim:",highest_dict["dim"],"with threshold:",highest_dict["threshold"] )
 
     # anomaly_score_per_example_w_highest_roc_auc contains anomaly scores (i.e. s(t), thus the number of elements
     # from the residual matrix that are higher than a threshold θ) based on the highest roc_auc (i.e. best decicable between normal and abnormal)
@@ -155,6 +181,7 @@ def calculateThresholdWithLabelsAsMSCRED(residual_matrix, labels_valid, residual
         #roc_auc_attri_dims_count_w, roc_auc_attri_dims_count_m = calculate_RocAuc(labels_valid,  y_pred)
         prec_rec_fscore_support = precision_recall_fscore_support(y_true, y_pred, average='weighted')
         curr_weighted_f1 = prec_rec_fscore_support[2]
+        prec_rec_fscore_support_pos_class = precision_recall_fscore_support(y_true, y_pred, average='binary')
         #print("Thrs:", curr_threshold, "| roc-auc:", 0, "| f1:", curr_weighted_f1)
 
         # Store highest f1 score and the threshold tau
@@ -166,6 +193,10 @@ def calculateThresholdWithLabelsAsMSCRED(residual_matrix, labels_valid, residual
             dict_results["precision_valid"] = prec_rec_fscore_support[0]
             dict_results["recall_valid"] = prec_rec_fscore_support[1]
             dict_results["f1_valid"] = curr_weighted_f1
+            dict_results["best_threshold_tau"] = best_threshold_tau
+            dict_results["precision_valid_anomaly"] = prec_rec_fscore_support_pos_class[0]
+            dict_results["recall_valid_anomaly"] = prec_rec_fscore_support_pos_class[1]
+            dict_results["f1_valid_anomaly"] = prec_rec_fscore_support_pos_class[2]
 
     print("Best f1-score on valid data set: ", highest_f1_score,"with threshold tau=",best_threshold_tau)
     y_pred = np.where(anomaly_score_per_example_w_highest_roc_auc >= best_threshold_tau, 1, 0)
@@ -228,19 +259,30 @@ def calculateThresholdWithLabelsAsMSCRED(residual_matrix, labels_valid, residual
             print("residuals_per_data_stream_idx["+str(i)+",:]", residuals_per_data_stream_idx[i, :])
             print("attr_names[residuals_per_data_stream_idx["+str(i)+", :]]", attr_names[residuals_per_data_stream_idx[i, :]])
 
+    if config.save_results_as_file:
+        import pickle
+        a_file = open('store_relevant_attribut_idx_' + curr_run_identifier + '.pkl', "wb")
+        pickle.dump(store_relevant_attribut_idx, a_file)
+        a_file.close()
+        a_file = open('store_relevant_attribut_dis_' + curr_run_identifier + '.pkl', "wb")
+        pickle.dump(store_relevant_attribut_dis, a_file)
+        a_file.close()
+        a_file = open('store_relevant_attribut_name_' + curr_run_identifier + '.pkl', "wb")
+        pickle.dump(store_relevant_attribut_name, a_file)
+        a_file.close()
+        np.save('predicted_anomalies' + curr_run_identifier + '.npy', y_pred)
+        if config.use_train_FaF_in_eval:
+            a_file = open('store_relevant_attribut_idx_' + curr_run_identifier + '_wTrainFaF.pkl', "wb")
+            pickle.dump(store_relevant_attribut_idx, a_file)
+            a_file.close()
+            a_file = open('store_relevant_attribut_dis_' + curr_run_identifier + '_wTrainFaF.pkl', "wb")
+            pickle.dump(store_relevant_attribut_dis, a_file)
+            a_file.close()
+            a_file = open('store_relevant_attribut_name_' + curr_run_identifier + '_wTrainFaF.pkl', "wb")
+            pickle.dump(store_relevant_attribut_name, a_file)
+            a_file.close()
+            np.save('predicted_anomalies' + curr_run_identifier + '_wTrainFaF.npy', y_pred)
 
-
-    import pickle
-    a_file = open('store_relevant_attribut_idx_' + curr_run_identifier + '.pkl', "wb")
-    pickle.dump(store_relevant_attribut_idx, a_file)
-    a_file.close()
-    a_file = open('store_relevant_attribut_dis_' + curr_run_identifier + '.pkl', "wb")
-    pickle.dump(store_relevant_attribut_dis, a_file)
-    a_file.close()
-    a_file = open('store_relevant_attribut_name_' + curr_run_identifier + '.pkl', "wb")
-    pickle.dump(store_relevant_attribut_name, a_file)
-    a_file.close()
-    np.save('predicted_anomalies' + curr_run_identifier + '.npy', y_pred)
 
 
     return anomaly_score_per_example_test, best_threshold_tau, dict_results #, y_pred
@@ -501,6 +543,7 @@ def calculateThresholdWithLabels(reconstructed_input, recon_err_perAttrib_valid,
             TN, FP, FN, TP = confusion_matrix(y_true, y_pred).ravel()
             p_r_f_s_weighted = precision_recall_fscore_support(y_true, y_pred, average='weighted')
             p_r_f_s_macro = precision_recall_fscore_support(y_true, y_pred, average='weighted')
+            p_r_f_s_binary = precision_recall_fscore_support(y_true, y_pred, average='binary')
             # Sensitivity, hit rate, recall, or true positive rate
             TPR = TP / (TP + FN)
             # Specificity or true negative rate
@@ -701,6 +744,9 @@ def evaluate(anomaly_score, labels_test, anomaly_threshold, average='weighted',c
         print(" +++ +++ +++ +++ +++ +++ +++ +++ +++ +++ +++ +++ +++ +++ +++ +++")
         print("")
         prec_rec_fscore_support = precision_recall_fscore_support(y_true, y_pred, average=average)
+        prec_rec_fscore_support_pos_class_ano = precision_recall_fscore_support(y_true, y_pred, average='binary')
+        prec_rec_fscore_support_pos_class_nor = precision_recall_fscore_support(y_true, y_pred, pos_label=0, average='binary')
+
 
         # fill dictonary
         dict_results['FPR_test'] = FPR
@@ -711,6 +757,12 @@ def evaluate(anomaly_score, labels_test, anomaly_threshold, average='weighted',c
         dict_results['precision_test'] = prec_rec_fscore_support[0]
         dict_results['recall_test'] = prec_rec_fscore_support[1]
         dict_results['f1_test'] = prec_rec_fscore_support[2]
+        dict_results['precision_test_ano_class'] = prec_rec_fscore_support_pos_class_ano[0]
+        dict_results['recall_test_ano_class'] = prec_rec_fscore_support_pos_class_ano[1]
+        dict_results['f1_test_ano_class'] = prec_rec_fscore_support_pos_class_ano[2]
+        dict_results['precision_test_nor_class'] = prec_rec_fscore_support_pos_class_nor[0]
+        dict_results['recall_test_nor_class'] = prec_rec_fscore_support_pos_class_nor[1]
+        dict_results['f1_test_nor_class'] = prec_rec_fscore_support_pos_class_nor[2]
 
         return dict_results
 
@@ -724,6 +776,7 @@ def calculateReconstructionError(real_input, reconstructed_input, plot_heatmaps,
     mse_per_example_per_dims = np.zeros((reconstructed_input.shape[0],reconstructed_input.shape[3]))
 
     print("reconstructed_input.shape[0]: ", reconstructed_input.shape[0])
+    print("real_input shape: ", real_input.shape)
     for i_example in range(reconstructed_input.shape[0]):  # Iterate over all examples
         for i_dim in range(reconstructed_input.shape[3]):  # Iterate over all "time-dimensions"
             # Get reconstructed and real input data
@@ -738,11 +791,11 @@ def calculateReconstructionError(real_input, reconstructed_input, plot_heatmaps,
             # Apply Frobenius norm and square (acc. Eq.6), output is a single scalar
             mse = np.square(np.square(np.linalg.norm(diff, ord='fro')))
 
-            # According https://github.com/numpy/numpy/blob/v1.22.0/numpy/linalg/linalg.py (frobenius norm)
-            diff_sqrt_squared = np.sqrt(np.square(diff))
+            # According https://github.com/7fantasysz/MSCRED/blob/4bdfcacf3d92b7f1b83a10708251453b7cf68075/code/evaluate.py#L64
+            diff_sqrt_squared = np.square(diff)
 
             # This is later used to compute the "broken" elements/correlation and is done as in the official implementation
-            # provided along the paper: https://github.com/7fantasysz/MSCRED/blob/4bdfcacf3d92b7f1b83a10708251453b7cf68075/code/evaluate.py#L64
+            # provided along the paper: https://github.com/7fantasysz/MSCRED/blob/4bdfcacf3d92b7f1b83a10708251453b7cf68075/code/evaluate.py#L65
             reconstruction_error_matrixes[i_example, :, :, i_dim] = diff_sqrt_squared
             '''
             plot_heatmap_of_reconstruction_error(id=i_example, dim=i_dim, input=curr_matrix_input_real,
@@ -1224,14 +1277,28 @@ def corr_rel_matrix_weighted_loss(corr_rel_mat):
         #loss = tf.reduce_mean(loss, axis=-1)
         #'''
 
+        '''
+        print("corr_rel_mat loss dim: ", corr_rel_mat.shape)
+        corr_rel_mat_reshaped = tf.repeat(tf.expand_dims(corr_rel_mat, -1),repeats=4, axis=-1)
+        print("corr_rel_matrix_weighted_loss loss dim: ", corr_rel_mat_reshaped.shape)
+        corr_rel_mat_reshaped = tf.expand_dims(tf.expand_dims(corr_rel_mat_reshaped, 0), 0)
+        print("corr_rel_matrix_weighted_loss loss dim: ", corr_rel_mat_reshaped.shape)
+        '''
+        corr_rel_mat_reshaped = tf.reshape(corr_rel_mat,(1, 1, 61, 61, 1))
+        a = y_true - y_pred
+        a = a * tf.cast(corr_rel_mat_reshaped, tf.float32)
         # Reshape with batch dim None: https://stackoverflow.com/questions/36668542/flatten-batch-in-tensorflow
         shape = y_true.get_shape().as_list()
         dim = np.prod(shape[1:])
-        y_true = tf.reshape(y_true, [-1, dim])
-        y_pred = tf.reshape(y_pred, [-1, dim])
+        #y_true = tf.reshape(y_true, [-1, dim])
+        #y_pred = tf.reshape(y_pred, [-1, dim])
+        a =  tf.reshape(a, [-1, dim])
 
+        #corr_rel_mat_reshaped = np.reshape(corr_rel_mat, (1, 1, 61, 61, 1)).astype(np.float32)
+        d = tf.reduce_sum(tf.square(tf.abs(a)), axis=1)
+        #residual_mat_cleaned = residual_mat * tf.cast(corr_rel_mat_reshaped, tf.float32)
         # MSCRED loss according to paper p. 1413, Eq. 6
-        d = tf.reduce_sum(tf.square(tf.abs(y_true - y_pred)), axis=1)
+
         # To avoid NAN loss
         dx = tf.sqrt(tf.maximum(d, 1e-9))
         squarred_frobenius_norm_per_example = tf.square(dx)
@@ -1313,11 +1380,75 @@ def SimLoss(y_true, y_pred):
     return loss
 
     #return tf.reduce_mean(loss, axis=-1)  # Note the `axis=-1`
-
+'''
 def MemEntropyLoss(y_true, y_pred):
     # Loss fosters memory access to be 1 or 0
     loss = tf.reduce_mean((-y_pred) * tf.math.log(y_pred + 1e-12), axis=-1)
     return loss
+'''
+
+def MemEntropyLoss(y_true, y_pred):
+        '''
+        # y_pred array with memory access positons
+        memory_accesses = y_pred
+
+        print("y_pred shape: ", y_pred.shape)
+        summed_acces_per_memory_entry = tf.reduce_mean(memory_accesses, axis=0)
+
+        size_per_memory = 10 # memory_accesses.shape[0]/4
+        mem1 = summed_acces_per_memory_entry[0:size_per_memory]
+        mem2 = summed_acces_per_memory_entry[size_per_memory*1:size_per_memory*2]
+        mem3 = summed_acces_per_memory_entry[size_per_memory * 2:size_per_memory * 3]
+        mem4 = summed_acces_per_memory_entry[size_per_memory * 3:size_per_memory * 4]
+
+        summed_acces_per_memory_entry = (mem1 + mem2 + mem3 + mem4) * 0.25
+
+        num_of_memory_entires = summed_acces_per_memory_entry.shape[0]
+        print("summed_acces_per_memory_entry shape: ", summed_acces_per_memory_entry.shape)
+        summed_acces_per_memory_entry_norm = summed_acces_per_memory_entry / tf.reduce_sum(summed_acces_per_memory_entry)
+        mem_zeros = tf.zeros((summed_acces_per_memory_entry.shape[0])) + (1/num_of_memory_entires) * 128 # (1 / num of memory entries) multiplied with accesses (batch size)
+        mem_zeros_norm = mem_zeros / tf.reduce_sum(mem_zeros)
+        means = tf.reduce_mean(summed_acces_per_memory_entry)
+        means_desired = tf.reduce_mean(mem_zeros_norm)
+        kl_loss = tf.keras.losses.kullback_leibler_divergence(mem_zeros_norm, summed_acces_per_memory_entry_norm)
+        # Loss fosters memory access to be 1 or 0 / Makes here no sense
+        loss_sparse_access = tf.reduce_mean((-memory_accesses) * tf.math.log(memory_accesses + 1e-12))
+        tf.print("Real mean: ", means, "Sum: ", tf.reduce_sum(summed_acces_per_memory_entry_norm), " | Desired mean: ",means_desired, " | kl_loss: ", kl_loss, " | loss sparse access: ", loss_sparse_access)
+        return kl_loss #+ loss_sparse_access
+        '''
+        # y_pred array with memory access positons
+        memory_accesses = y_pred
+
+        print("y_pred shape: ", y_pred.shape)
+        summed_acces_per_memory_entry = tf.reduce_mean(memory_accesses, axis=0)
+        size_per_memory = config.memory_size  # memory_accesses.shape[0]/4
+        loss = 0
+        for m in range(4):
+            mem = summed_acces_per_memory_entry[size_per_memory * m : size_per_memory * (m+1)]
+            #mem2 = summed_acces_per_memory_entry[size_per_memory*m : size_per_memory * m]
+            #mem3 = summed_acces_per_memory_entry[size_per_memory * m : size_per_memory * m]
+            #mem4 = summed_acces_per_memory_entry[size_per_memory * m : size_per_memory * m]
+
+            #summed_acces_per_memory_entry = (mem1 + mem2 + mem3 + mem4) * 0.25
+
+            mem_acc = memory_accesses[size_per_memory * m : size_per_memory * (m+1)]
+
+            num_of_memory_entires = mem.shape[0]
+            print("summed_acces_per_memory_entry shape: ", mem.shape)
+            summed_access_per_memory_entry_norm = mem / tf.reduce_sum(mem)
+            mem_zeros = tf.zeros((mem.shape[0])) + (1/num_of_memory_entires) * 128 # (1 / num of memory entries) multiplied with accesses (batch size)
+            mem_zeros_norm = mem_zeros / tf.reduce_sum(mem_zeros)
+            means = tf.reduce_mean(mem)
+            means_desired = tf.reduce_mean(mem_zeros_norm)
+            kl_loss = tf.keras.losses.kullback_leibler_divergence(mem_zeros_norm, summed_access_per_memory_entry_norm)
+            # Loss fosters memory access to be 1 or 0 / Makes here no sense
+            #entropy = (-mem_acc) * tf.math.log(mem_acc + 1e-12)
+            #tf.print("entropy shape:",entropy.shape)
+            loss_sparse_access = tf.reduce_mean((-mem_acc) * tf.math.log(mem_acc + 1e-12))
+            #tf.print(m, "Real mean: ", means, " | Desired mean: ",means_desired, "Sum: ", tf.reduce_sum(summed_access_per_memory_entry_norm), " | kl_loss: ", kl_loss, " | loss sparse access: ", loss_sparse_access)
+            loss = loss + kl_loss# + loss_sparse_access
+        return loss #+ loss_sparse_access
+
 
 def plot_training_process_history(history, curr_run_identifier):
     # list all data in history
@@ -1348,6 +1479,50 @@ def apply_corr_rel_matrix_on_input(use_corr_rel_matrix_for_input, use_corr_rel_m
         input_data = input_data * np_corr_rel_matrix_reshaped
         print("Finished removing irrelevant correlations from the input")
     return input_data
+
+def reduce_FaF_examples_in_val_split(valid_labels_y, X_valid_wF, test_labels_y, used_rate=0.0,reduce_no_failure_also=True):
+    # used_rate: 0.0 nothing is deleted, 1.0 all is deleted
+    ### reduce fault and failure from valid split
+    if used_rate == 0.0:
+        print("No valid split size reduction")
+    else:
+        indxes_of_FaFs_examples = np.argwhere(valid_labels_y != "no_failure")
+        num_rnd = int(indxes_of_FaFs_examples.shape[0] * used_rate)
+        np.random.seed(2022)
+        indices_to_remove = np.random.choice(np.squeeze(indxes_of_FaFs_examples), replace=False, size=int(num_rnd))
+        np.random.seed()
+        valid_labels_y  = np.delete(valid_labels_y, indices_to_remove, 0)
+        X_valid_wF      = np.delete(X_valid_wF, indices_to_remove, 0)
+        if reduce_no_failure_also:
+            indxes_of_No_FaFs_examples = np.argwhere(valid_labels_y == "no_failure")
+            num_rnd_noFaF = int(indxes_of_FaFs_examples.shape[0] * used_rate)
+            np.random.seed(2022)
+            indices_of_NoFaF_to_remove = np.random.choice(np.squeeze(indxes_of_No_FaFs_examples), replace=False, size=int(num_rnd_noFaF))
+            np.random.seed()
+            valid_labels_y  = np.delete(valid_labels_y, indices_of_NoFaF_to_remove, 0)
+            X_valid_wF      = np.delete(X_valid_wF, indices_of_NoFaF_to_remove, 0)
+            print("Removed FaFs:",num_rnd,"No FaFs:",num_rnd_noFaF)
+        else:
+            print("Removed FaFs:", num_rnd,"No healthy examples are removed. This cut effect the ratio between no-failure/failure and subsequently weighted f1 scores on test ... ")
+        print("valid_labels_y shape after reduction:", valid_labels_y.shape)
+        print("X_valid_wF shape after reduction:", X_valid_wF.shape)
+        labels_in_valid = np.unique(valid_labels_y)
+        labels_in_test = np.unique(test_labels_y)
+
+        # Check if test labels also in valid ones and show which are not in valid
+        mask_zero_shots = np.isin(labels_in_test, labels_in_valid, invert=True)
+        zero_shot_labels = labels_in_test[mask_zero_shots]
+        print("Zero Shot labels (not in valid but in test set): ", zero_shot_labels)
+    return valid_labels_y, X_valid_wF
+
+def reduce_size_of_valid_for_healthy_examples(valid_labels_y, recon_err_matrixes_valid_wf, num_of_examples):
+    indxes_of_No_FaFs_examples = np.argwhere(valid_labels_y == "no_failure")
+    np.random.seed(2022)
+    indices_of_NoFaF_to_remove = np.random.choice(np.squeeze(indxes_of_No_FaFs_examples), replace=False, size=int(num_of_examples))
+    np.random.seed()
+    valid_labels_y = np.delete(valid_labels_y, indices_of_NoFaF_to_remove, 0)
+    recon_err_matrixes_valid_wf_ = np.delete(recon_err_matrixes_valid_wf, indices_of_NoFaF_to_remove, 0)
+    return valid_labels_y, recon_err_matrixes_valid_wf_
 
 def apply_corr_rel_matrix_on_residual_matrix(use_corr_rel_matrix_for_input_replace_by_epsilon,input_data,np_corr_rel_matrix):
     print("input_data shape: ", input_data.shape)
@@ -1380,7 +1555,7 @@ def calculate_RocAuc(test_failure_labels_y, score_per_example):
         y_true = test_failure_labels_y
     #print("mse_per_example_test:", mse_per_example_test.shape)
     score_per_example_test_normalized = (score_per_example - np.min(score_per_example)) / np.ptp(score_per_example)
-    np.nan_to_num(score_per_example_test_normalized)
+    score_per_example_test_normalized = np.nan_to_num(score_per_example_test_normalized)
     roc_auc_score_value = roc_auc_score(y_true, score_per_example_test_normalized, average='weighted')
     roc_auc_score_value_m = roc_auc_score(y_true, score_per_example_test_normalized, average='macro')
     return roc_auc_score_value, roc_auc_score_value_m
@@ -1395,6 +1570,7 @@ def calculate_PRCurve(test_failure_labels_y, score_per_example):
     #print("y_true: ", y_true.shape)
     #print("mse_per_example_test:", mse_per_example_test.shape)
     score_per_example_test_normalized = (score_per_example - np.min(score_per_example)) / np.ptp(score_per_example)
+    score_per_example_test_normalized = np.nan_to_num(score_per_example_test_normalized)
     avgP = average_precision_score(y_true, score_per_example_test_normalized, average='weighted')
     avgP_m = average_precision_score(y_true, score_per_example_test_normalized, average='macro')
     precision, recall, _ = precision_recall_curve(y_true, score_per_example_test_normalized)
@@ -1487,7 +1663,7 @@ def find_anomaly_threshold(nn_distance_valid, labels_valid):
     return f1_weighted_max_threshold, f1_macro_max_threshold
 
 
-def main(run=""):
+def main(run="", val_split_rate=1.0):
     # Configurations
     train_model = config.train_model
     test_model = config.test_model
@@ -1564,17 +1740,21 @@ def main(run=""):
     feature_names_path = config.feature_names_path
     valid_matrix_path_wF = config.valid_matrix_path_wF
     valid_labels_y_path_wF = config.valid_labels_y_path_wF
+    train_matrix_path_wF = config.train_faf_matrix_path
+    train_labels_y_path_wF = config.train_faf_labels_y_path
 
     ### Load Adj Matrix
-    adj_matrix_attr_df = pd.read_csv(config.graph_adjacency_matrix_attributes_file, sep=';', index_col=0)
+    #adj_matrix_attr_df = pd.read_csv(config.graph_adjacency_matrix_attributes_file, sep=';', index_col=0)
+    adj_matrix_attr_df = pd.read_csv(config.graph_adjacency_matrix_attributes_file, sep=',', header=None)
     adj_mat = adj_matrix_attr_df.values.astype(dtype=np.float)
 
     ### Create MSCRED model as TF graph
     print("config.relevant_features: ", config.relevant_features)
-    test_labels_y = np.load(test_labels_y_path)
+    test_labels_y = np.load(test_labels_y_path, allow_pickle=True)
     print("test_labels_y: ", test_labels_y)
     ### Load Correlation Relevance Matrix ###
-    df_corr_rel_matrix = pd.read_csv('../data/Attribute_Correlation_Relevance_Matrix_v0.csv', sep=';',index_col=0)
+    #df_corr_rel_matrix = pd.read_csv('../data/Attribute_Correlation_Relevance_Matrix_v0.csv', sep=';',index_col=0)
+    df_corr_rel_matrix = adj_matrix_attr_df
     np_corr_rel_matrix = df_corr_rel_matrix.values
     print("np_corr_rel_matrix shape: ", np_corr_rel_matrix.shape)
     print("Only ", np.sum(np_corr_rel_matrix)," of ",np_corr_rel_matrix.shape[0] * np_corr_rel_matrix.shape[1]," correlations")
@@ -1641,19 +1821,19 @@ def main(run=""):
                     model_MSCRED.compile(optimizer=opt,
                                          loss=[corr_rel_matrix_weighted_loss(corr_rel_mat=np_corr_rel_matrix),
                                                MemEntropyLoss],
-                                         loss_weights=[0.9998, 0.0002]) # [0.9998, 0.0002] # [0.99999999, 0.00000001]
+                                         loss_weights=[0.7, 0.3]) # [0.9998, 0.0002] # [0.99999999, 0.00000001]
                 else:
                     model_MSCRED.compile(optimizer=opt,
                                          loss=corr_rel_matrix_weighted_loss(corr_rel_mat=np_corr_rel_matrix))  # [0.9998, 0.0002]
             else:
                 if use_MemEntropyLoss:
-                    model_MSCRED.compile(optimizer=opt, loss=[mscred_loss, MemEntropyLoss], loss_weights=[0.9998, 0.0002]) # [0.9998, 0.0002]
+                    model_MSCRED.compile(optimizer=opt, loss=[mscred_loss, MemEntropyLoss], loss_weights=[0.7, 0.3]) # [0.9998, 0.0002]
                 else:
                     model_MSCRED.compile(optimizer=opt, loss=mscred_loss)  # [0.9998, 0.0002]
         elif use_loss_corr_rel_matrix:
             model_MSCRED.compile(optimizer=opt, loss=corr_rel_matrix_weighted_loss(corr_rel_mat=np_corr_rel_matrix))
         elif loss_use_batch_sim_siam:
-            model_MSCRED.compile(optimizer=opt, loss=[mscred_loss, SimLoss],loss_weights=[0.9, 0.1])
+            model_MSCRED.compile(optimizer=opt, loss=[mscred_loss, SimLoss],loss_weights=[0.7, 0.3])
         else:
             model_MSCRED.compile(optimizer=opt, loss=mscred_loss)
 
@@ -1677,7 +1857,7 @@ def main(run=""):
             model_MSCRED = tf.keras.models.load_model('best_model_' + curr_run_identifier + '.h5', custom_objects={
                 'loss': corr_rel_matrix_weighted_loss(corr_rel_mat=np_corr_rel_matrix), 'Memory': Memory,'Memory2': Memory2}, compile=False)
         else:
-            model_MSCRED = tf.keras.models.load_model('best_model_'+curr_run_identifier+'.h5', custom_objects={'loss': corr_rel_matrix_weighted_loss(corr_rel_mat=np_corr_rel_matrix), 'Memory': Memory})
+            model_MSCRED = tf.keras.models.load_model('best_model_'+curr_run_identifier+'.h5', custom_objects={'loss': corr_rel_matrix_weighted_loss(corr_rel_mat=np_corr_rel_matrix), 'Memory': Memory}, compile=False)
 
         print("Pretrained Model loaded ...")
 
@@ -1688,8 +1868,36 @@ def main(run=""):
         X_valid_wF = np.load(valid_matrix_path_wF)
         if config.use_data_set_version == 2022:
             X_valid_wF = np.transpose(X_valid_wF, [0, 1, 3, 4, 2])
-        valid_labels_y = np.load(valid_labels_y_path_wF)
+        valid_labels_y = np.load(valid_labels_y_path_wF,allow_pickle=True)
 
+        valid_labels_y, X_valid_wF = reduce_FaF_examples_in_val_split(valid_labels_y, X_valid_wF, test_labels_y, used_rate=val_split_rate)
+        '''
+        ### reduce fault and failure from valid split
+        print("Are there already zero shot labels?", np.unique(test_labels_y)[np.isin(np.unique(test_labels_y), np.unique(valid_labels_y), invert=True)])
+        print(print("valid_labels_y: "), valid_labels_y)
+        print("where:",np.where(valid_labels_y != "no_failure")[0])
+        print("argwhere:",np.argwhere(valid_labels_y != "no_failure"))
+        indxes_of_FaFs_examples = np.argwhere(valid_labels_y != "no_failure")
+        idx_change_rate = 0.5
+        num_rnd = int(indxes_of_FaFs_examples.shape[0] * idx_change_rate)
+        indices_to_remove = np.random.choice(np.squeeze(indxes_of_FaFs_examples), replace=False, size=int(num_rnd))
+        print("indices_to_remove:", indices_to_remove)
+        print("valid_labels_y shape:", valid_labels_y.shape)
+        print("X_valid_wF shape:", X_valid_wF.shape)
+        valid_labels_y = np.delete(valid_labels_y, indices_to_remove, 0)
+        X_valid_wF = np.delete(X_valid_wF, indices_to_remove, 0)
+        print("valid_labels_y deleted shape:", valid_labels_y.shape)
+        print("X_valid_wF deleted shape:", X_valid_wF.shape)
+        print("valid_labels_y:", valid_labels_y)
+        labels_in_valid = np.unique(valid_labels_y)
+        labels_in_test  = np.unique(test_labels_y)
+        print("labels_in_valid:", labels_in_valid)
+        #Check if test labels also in valid ones and show which are not in valid
+        mask_zero_shots =  np.isin(labels_in_test,labels_in_valid, invert=True)
+        print("mask:", mask_zero_shots)
+        zero_shot_labels = labels_in_test[mask_zero_shots]
+        print("Zero Shot labels: ",zero_shot_labels)
+        '''
         # Remove irrelevant correlations
         X_valid = apply_corr_rel_matrix_on_input(use_corr_rel_matrix_for_input,
                                                          use_corr_rel_matrix_for_input_replace_by_epsilon,
@@ -1710,7 +1918,21 @@ def main(run=""):
                                                  X_test, np_corr_rel_matrix)
         X_test_y = X_test[:, step_size - 1, :, :, :]
 
-        # Load failure examples of the training data (failure examples excluded from the training) for further evaluation?
+        # Load failure examples of the training data (failure examples excluded from the training) for further evaluation
+        # And append them to X_test
+        if config.use_train_FaF_in_eval:
+            X_train_wF = np.load(train_matrix_path_wF)
+            train_labels_y_wF = np.load(train_labels_y_path_wF)
+            # Remove any dimension with size of 1
+            train_labels_y_wF = np.squeeze(train_labels_y_wF)
+            if config.use_data_set_version == 2022:
+                X_train_wF = np.transpose(X_train_wF, [0, 1, 3, 4, 2])
+            print("train_labels_y_wF:", train_labels_y_wF.shape, "X_train_wF shape: ", X_train_wF.shape)
+            X_train_wF = apply_corr_rel_matrix_on_input(use_corr_rel_matrix_for_input,
+                                                        use_corr_rel_matrix_for_input_replace_by_epsilon,
+                                                        X_train_wF, np_corr_rel_matrix)
+            X_train_wF_y = X_train_wF[:, step_size - 1, :, :, :]
+            print("X_train_wF:",X_train_wF.shape, "X_train_wF_y shape: ", X_train_wF_y.shape)
 
         print("Validation split: ", X_valid.shape,"Validation split with Failure: ", X_valid_wF.shape, "Test data:", X_test.shape)
 
@@ -1764,6 +1986,31 @@ def main(run=""):
         else:
             X_valid_recon_wf = model_MSCRED.predict(X_valid_wF, batch_size=128)
         print("Reconstruction of validation data with Failures set done with shape :", X_valid_recon_wf.shape) #((9, 61, 61, 3))
+        if config.use_train_FaF_in_eval:
+            if loss_use_batch_sim_siam or use_memory_restriction:
+                #b = Batch(51, 97)
+                b = Batch(4, 135) # 540
+                for i in range(4):
+                    if i == 0:
+                        if use_MemEntropyLoss:
+                            output = model_MSCRED.predict(X_train_wF[b.next(), :, :, :, :])
+                            X_train_recon_wf = output[0]
+                            X_train_memAccess = output[1]
+                        else:
+                            X_train_recon_wf = model_MSCRED.predict(X_train_wF[b.next(), :, :, :, :])
+                    else:
+                        if use_MemEntropyLoss:
+                            #X_valid_recon = np.concatenate((X_valid_recon, model_MSCRED.predict(X_valid[b.next(),:,:,:,:])[0]), axis=0)
+                            output = model_MSCRED.predict(X_train_wF[b.next(),:,:,:,:])
+                            X_train_recon_wf = np.concatenate((X_train_recon_wf, output[0]), axis=0)
+                            X_train_memAccess = np.concatenate((X_train_memAccess, output[1]), axis=0)
+                        else:
+                            X_train_recon_wf = np.concatenate((X_train_recon_wf, model_MSCRED.predict(X_train[b.next(), :, :, :, :])), axis=0)
+                    #X_valid_recon = model_MSCRED.predict(X_valid[b.next(),:,:,:,:])[0]
+                #X_valid_recon = model_MSCRED.predict(X_valid, batch_size=128)[0]
+            else:
+                X_train_recon_wf = model_MSCRED.predict(X_train_wF, batch_size=128)
+            print("Reconstruction of (original) training data with Failures set done with shape :", X_train_recon_wf.shape) #((9, 61, 61, 3))
         if loss_use_batch_sim_siam or use_memory_restriction:
             #b = Batch(44, 149) # https://www.matheretter.de/rechner/primzahltest
             b = Batch(28, 121) # https://www.matheretter.de/rechner/primzahltest
@@ -1797,14 +2044,33 @@ def main(run=""):
         # Generate deep encodings
         # Dummy model for obtaining access to latent encodings / space
         if generate_deep_encodings:
+            # Load train data
+            #  Loading the training data
+            curr_xTrainData = np.load(training_data_set_path)
+            if config.use_data_set_version == 2022:
+                # change format from: (example_dim, 4, len(win_size), x_features.shape[2], x_features.shape[2]))
+                curr_xTrainData = np.transpose(curr_xTrainData, [0, 1, 3, 4, 2])
+                print("Training failure-free data swapped acc. old dimensional order (examples,lenght,sensor,sensor,dim")
+                X_train, X_valid = model_selection.train_test_split(curr_xTrainData, test_size=split_train_test_ratio,
+                                                                    random_state=42)
+                X_train = apply_corr_rel_matrix_on_input(use_corr_rel_matrix_for_input,
+                                                            use_corr_rel_matrix_for_input_replace_by_epsilon,
+                                                            X_train, np_corr_rel_matrix)
+
             layer_name = 'Reshape_ToOrignal_ConvLSTM_4'
             intermediate_layer_model = tf.keras.Model(inputs=model_MSCRED.input,
                                                    outputs=model_MSCRED.get_layer(layer_name).output)
+            encoded_output_train = intermediate_layer_model.predict(X_train, batch_size=128)
             encoded_output_test = intermediate_layer_model.predict(X_test, batch_size=128)
             encoded_output_valid_wf = intermediate_layer_model.predict(X_valid_wF, batch_size=128)
+            if config.use_train_FaF_in_eval:
+                encoded_output_train_wf = intermediate_layer_model.predict(X_train_wF, batch_size=128)
+                np.save('encoded_output_train_wf_' + str(run) + '.npy', encoded_output_train_wf)
             print("Encoded_output_valid_wf shape:", encoded_output_valid_wf.shape,"Encoded_output_test shape:", encoded_output_test.shape)
-            np.save('encoded_test.npy', encoded_output_test)
-            np.save('encoded_output_valid_wf.npy', encoded_output_valid_wf)
+            np.save('encoded_train_' + str(run) + '.npy', encoded_output_train)
+            np.save('encoded_test_'+str(run)+'.npy', encoded_output_test)
+            np.save('encoded_output_valid_wf_'+str(run)+'.npy', encoded_output_valid_wf)
+
 
         feature_names = np.load(feature_names_path)
 
@@ -1836,23 +2102,31 @@ def main(run=""):
         print("threshold_selection_criterium: ", threshold_selection_criterium, " with: ",num_of_dim_over_threshold,"/",num_of_dim_under_threshold, ". CorrMatrix: ", use_corr_rel_matrix_in_eval,"Anomaly based on Attributes: ", use_attribute_anomaly_as_condition)
 
         ### Calcuation of reconstruction error on the validation data set ###
-        recon_err_matrixes_valid, recon_err_perAttrib_valid, mse_per_example_valid, mse_per_example_per_dims = calculateReconstructionError(
+        recon_err_matrixes_valid, recon_err_perAttrib_valid, mse_per_example_valid, mse_per_example_per_dims_valid = calculateReconstructionError(
             real_input=X_valid_y, reconstructed_input=X_valid_recon, plot_heatmaps=plot_heatmap_of_rec_error,
             use_corr_rel_matrix=use_corr_rel_matrix_in_eval, corr_rel_matrix=np_corr_rel_matrix)
 
 
         ### Calcuation of reconstruction error on the validation data set with Failures###
-        recon_err_matrixes_valid_wf, recon_err_perAttrib_valid_wf, mse_per_example_valid_wf, mse_per_example_per_dims_wf = calculateReconstructionError(
+        recon_err_matrixes_valid_wf, recon_err_perAttrib_valid_wf, mse_per_example_valid_wf, mse_per_example_per_dims_valid_wf = calculateReconstructionError(
             real_input=X_valid_wF_y, reconstructed_input=X_valid_recon_wf, plot_heatmaps=plot_heatmap_of_rec_error,
             use_corr_rel_matrix=use_corr_rel_matrix_in_eval, corr_rel_matrix=np_corr_rel_matrix)
-        print("recon_err_matrixes_valid_wf:", recon_err_matrixes_valid_wf.shape,"recon_err_perAttrib_valid_wf:", recon_err_perAttrib_valid_wf.shape,"mse_per_example_valid_wf:",mse_per_example_valid_wf.shape ,"mse_per_example_per_dims_wf:", mse_per_example_per_dims_wf.shape)
+        print("recon_err_matrixes_valid_wf:", recon_err_matrixes_valid_wf.shape,"recon_err_perAttrib_valid_wf:", recon_err_perAttrib_valid_wf.shape,"mse_per_example_valid_wf:",mse_per_example_valid_wf.shape ,"mse_per_example_per_dims_valid_wf:", mse_per_example_per_dims_valid_wf.shape)
         # recon_err_matrixes_valid_wf: (381, 61, 61, 4) recon_err_perAttrib_valid_wf: (381, 122, 4) mse_per_example_valid_wf: (381,) mse_per_example_per_dims_wf: (381, 4)
 
         print("X_test_y shape:",X_test_y.shape,"X_test_recon shape:",X_test_recon.shape)
         ### Calcuation of reconstruction error on the test data set ###
-        recon_err_matrixes_test, recon_err_perAttrib_test, mse_per_example_test, mse_per_example_per_dims = calculateReconstructionError(
+        recon_err_matrixes_test, recon_err_perAttrib_test, mse_per_example_test, mse_per_example_per_dims_train = calculateReconstructionError(
             real_input=X_test_y, reconstructed_input=X_test_recon, plot_heatmaps=plot_heatmap_of_rec_error,
             use_corr_rel_matrix=use_corr_rel_matrix_in_eval, corr_rel_matrix=np_corr_rel_matrix, y_labels=test_labels_y)
+
+        if config.use_train_FaF_in_eval:
+            ### Calcuation of reconstruction error on the test data set ###
+            print("test_labels_y SHape:", test_labels_y.shape, "train_labels_y_wF shape:", train_labels_y_wF.shape)
+            recon_err_matrixes_train_wF, recon_err_perAttrib_train_wF, mse_per_example_train_wF, mse_per_example_per_dims_train_wf = calculateReconstructionError(
+                real_input=X_train_wF_y, reconstructed_input=X_train_recon_wf, plot_heatmaps=plot_heatmap_of_rec_error,
+                use_corr_rel_matrix=use_corr_rel_matrix_in_eval, corr_rel_matrix=np_corr_rel_matrix,
+                y_labels=train_labels_y_wF)
 
         '''
         This is already done in the methode calculateReconstructionError
@@ -1971,42 +2245,110 @@ def main(run=""):
 
         dict_results = evaluate(anomaly_score_per_example_test, test_labels_y, best_threshold_tau, average='weighted', curr_run_identifier=curr_run_identifier,dict_results=dict_results)
 
-        return dict_results
+        if config.use_train_FaF_in_eval:
+            print("\n++++ Eval Test + Train FaF starts ... ++++\n")
+            # Similar to previously, first a threshold is computed on a valid set with adjusted ratio to the new test set
+            # in which the number of FaF examples is increased by the training examples FaFs that are not used
+
+            dict_results_test_train_wF = {}
+
+            # Merge FaF examples from train with test
+            print("test_labels_y SHape:", test_labels_y.shape,"train_labels_y_wF shape:",train_labels_y_wF.shape)
+            test_train_labels_y = np.concatenate((test_labels_y, train_labels_y_wF), axis=0)
+            recon_err_matrixes_test_train_wF = np.concatenate((recon_err_matrixes_test, recon_err_matrixes_train_wF), axis=0)
+            print("Shape merged labels:", test_train_labels_y.shape,"| Shape merged recon matrix:",recon_err_matrixes_test_train_wF.shape)
+
+            # Reduce size to have the same ratio of no-failure to failure in the test set
+            valid_labels_y_red, recon_err_matrixes_valid_wf_red = reduce_size_of_valid_for_healthy_examples(valid_labels_y, recon_err_matrixes_valid_wf, 170) # 170 are removed to get 156
+            print(" Shape reduced recon_err_matrixes_valid_wf_red:",recon_err_matrixes_valid_wf_red.shape,"| valid_labels_y_red:",valid_labels_y_red.shape)
+
+            # Get Anomaly Scores etc.
+            anomaly_score_per_example_test_train_wF, best_threshold_tau_, dict_results_test_train_wF = calculateThresholdWithLabelsAsMSCRED(
+                residual_matrix=recon_err_matrixes_valid_wf_red, labels_valid=valid_labels_y_red,
+                residual_matrix_test=recon_err_matrixes_test_train_wF, residual_matrix_wo_FaF=recon_err_matrixes_valid,
+                attr_names=feature_names, curr_run_identifier=curr_run_identifier, dict_results=dict_results_test_train_wF, trainFaFUsed=config.use_train_FaF_in_eval)
+            print("anomaly_score_per_example_test_train_wF shape: ", anomaly_score_per_example_test_train_wF.shape,
+                  "test_labels_y shape:", test_train_labels_y.shape)
+
+            dict_results_test_train_wF = evaluate(anomaly_score_per_example_test_train_wF, test_train_labels_y, best_threshold_tau_,
+                                    average='weighted', curr_run_identifier=curr_run_identifier,
+                                    dict_results=dict_results_test_train_wF)
+
+            print("\n++++ Eval Test + Train FaF finished ... ++++\n")
+        if config.use_train_FaF_in_eval:
+            return dict_results, dict_results_test_train_wF
+        else:
+            return dict_results
 
 
 if __name__ == '__main__':
     dict_measures_collection = {}
+    dict_measures_collection_2 = {}
     num_of_runs = 5
+    eval_with_reduced_val_split = config.used_valid_split #[0.0,0.25,0.50,0.75,0.90] # [0.0,0.10,0.25,0.50,0.75,0.90] # rate of reduction
 
-    for run in range(num_of_runs):
-        print(" ############## START OF RUN "+str(run)+" ##############")
+    for val_split_rate in eval_with_reduced_val_split:
+        for run in range(num_of_runs):
+            print(" ############## START OF RUN "+str(run)+" ##############")
+            print()
+            if config.use_train_FaF_in_eval:
+                dict_measures, dict_measures_2 = main(run, val_split_rate=val_split_rate)
+                dict_measures_collection[run] = dict_measures
+                dict_measures_collection_2[run] = dict_measures_2
+            else:
+                dict_measures = main(run,val_split_rate=val_split_rate)
+                dict_measures_collection[run] = dict_measures
+            print()
+            print(" ############## END OF RUN " + str(run) + " ##############")
+
         print()
-        dict_measures = main(run)
-        dict_measures_collection[run] = dict_measures
+        print("Saved data:")
+        print("dict_measures_collection: ", dict_measures_collection)
         print()
-        print(" ############## END OF RUN " + str(run) + " ##############")
+        mean_dict_0 = {}
+        mean_dict_0_2 = {}
+        if config.use_train_FaF_in_eval:
+            for key in dict_measures_collection[0]:
+                mean_dict_0[key] = []
+            for key in dict_measures_collection_2[0]:
+                mean_dict_0_2[key] = []
 
-    print()
-    print("Saved data:")
-    print("dict_measures_collection: ", dict_measures_collection)
-    print()
-    mean_dict_0 = {}
-    for key in dict_measures_collection[0]:
-        mean_dict_0[key] = []
+            for i in range(num_of_runs):
+                for key in dict_measures_collection[i]:
+                    #print("key: ", key)
+                    mean_dict_0[key].append(dict_measures_collection[i][key])
+                for key in dict_measures_collection_2[i]:
+                    #print("key: ", key)
+                    mean_dict_0_2[key].append(dict_measures_collection_2[i][key])
+        else:
+            for key in dict_measures_collection[0]:
+                mean_dict_0[key] = []
 
-    #print("mean_dict_0: ", mean_dict_0)
+            for i in range(num_of_runs):
+                for key in dict_measures_collection[i]:
+                    #print("key: ", key)
+                    mean_dict_0[key].append(dict_measures_collection[i][key])
 
-    for i in range(num_of_runs):
-        for key in dict_measures_collection[i]:
-            #print("key: ", key)
-            mean_dict_0[key].append(dict_measures_collection[i][key])
+        # print("mean_dict_0: ", mean_dict_0)
+        print("### FINAL RESULTS OF " +str(num_of_runs) + " RUNS WITH VAL_SPLIT_RATIO: " +str(val_split_rate)+"###")
+        print()
+        print("VAL SPLIT: ", val_split_rate)
+        print()
+        print("Key;Mean;Std")
+        # compute mean
+        dict_mean = {}
+        for key in mean_dict_0:
+            mean = np.mean(mean_dict_0[key])
+            std = np.std(mean_dict_0[key], axis=0)
+            print(key, ";", mean, ";", std)
 
-    # print("mean_dict_0: ", mean_dict_0)
-    print("### FINAL RESULTS OF " +str(num_of_runs) + " RUNS ###")
-    print("Key;Mean;Std")
-    # compute mean
-    dict_mean = {}
-    for key in mean_dict_0:
-        mean = np.mean(mean_dict_0[key])
-        std = np.std(mean_dict_0[key], axis=0)
-        print(key, ";", mean, ";", std)
+        if config.use_train_FaF_in_eval:
+            print()
+            print("### RESULTS FOR FaF IN TRAIN and TEST (AS BEFORE) ###")
+            print()
+            print("Key;Mean;Std")
+            dict_mean = {}
+            for key in mean_dict_0_2:
+                mean = np.mean(mean_dict_0_2[key])
+                std = np.std(mean_dict_0_2[key], axis=0)
+                print(key, ";", mean, ";", std)
