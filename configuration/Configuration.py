@@ -59,12 +59,12 @@ class Configuration:
         elif self.use_data_set_version == 2022_2:
             self.dim_of_dataset = 3
         #self.dim_of_dataset = 18  # 1: 8 2: 17 3:18
-        self.epochs = 1                           # used in eval: 100
+        self.epochs = 100                           # used in eval: 100
         self.learning_rate = 0.001                  # used in eval: 0.001
         self.early_stopping_patience = 3            # used in eval: 3
         self.split_train_test_ratio = 0.1
         self.use_strides = True
-        self.threshold_step = 1000000                  # used in eval: 100, faster: 1000 or 10.000
+        self.threshold_step = 100                  # used in eval: 100, faster: 1000 or 10.000
         self.used_valid_split = [0.0] # [0.0, 0.25, 0.50, 0.75, 0.90, 0.95, 0.97] # [0.0] #[0.0,0.25,0.50,0.75,0.90]
 
         if self.use_strides == True:
