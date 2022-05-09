@@ -13,7 +13,7 @@ class Configuration:
         ###
         # General Configuration
         ###
-        self.curr_run_identifier = "Fin_DS_MANW_2022_wAdjMat_" #Fin_Standard_wAdjMat_newAdj_2 #"Fin_Standard_wAdjMat_newAdj_2_wAdjMatwFM_"#"Fin_Standard_wAdjMat_newAdj_2_wAdjMatShuffled"
+        self.curr_run_identifier = "Fin_DS_MANW_2022_Standard_" #Fin_Standard_wAdjMat_newAdj_2 #"Fin_Standard_wAdjMat_newAdj_2_wAdjMatwFM_"#"Fin_Standard_wAdjMat_newAdj_2_wAdjMatShuffled"
         self.use_data_set_version = 2022_2
         self.train_model = True
         self.test_model = True
@@ -35,9 +35,9 @@ class Configuration:
         self.use_graph_conv = False
         self.normalize_residual_matrices = False     # Normalization of reconstruction error
 
-        self.use_loss_corr_rel_matrix = True   # MSCRED default: False, Reconstruction error loss is only based on correlations that are manually defined as relevant
+        self.use_loss_corr_rel_matrix = False   # MSCRED default: False, Reconstruction error loss is only based on correlations that are manually defined as relevant
         self.loss_use_batch_sim_siam = False    # MSCRED default: False,
-        self.use_corr_rel_matrix_for_input = True  # MSCRED default: False,  input contains only relevant correlations, others set to zero
+        self.use_corr_rel_matrix_for_input = False  # MSCRED default: False,  input contains only relevant correlations, others set to zero
         self.use_corr_rel_matrix_for_input_replace_by_epsilon = False  # MSCRED default: False,  meaningful correlation that would be zero, are now near zero
         self.use_corr_rel_matrix_on_masking_residual_matrices = False    # NOT USED; Masking out irrelevant correlations during the evaluation phase is already done with the activation of: use_loss_corr_rel_matrix
 
@@ -77,7 +77,7 @@ class Configuration:
                 self.strides_encoder = [1, 2, 2, 2] #[1, 2, 2, 2]
                 self.dilation_encoder = [1, 1, 1, 1]
                 if self.use_data_set_version == 2022_2:
-                    self.output_dim = [8, 16, 31, 78]  #[8, 16, 31, 61]    #dependent on strides
+                    self.output_dim = [10, 20, 39, 78]  #[8, 16, 31, 61]    #dependent on strides
                 else:
                     self.output_dim = [8, 16, 31, 61]
                 self.filter_dimension_encoder = [32, 64, 128, 256]# [32, 64, 128, 256] #[8, 16, 32, 64]  # [8, 16, 32, 64]#[32, 64, 128, 256] #[32, 16, 8, 4] # [64, 32, 16, 8] # [32, 64, 128, 256]#[32, 64, 128, 256]  # [16, 8, 4, 1] [64, 128, 256, 512]  #  # [16, 32, 64, 128] #[32, 64, 128, 256] #[64, 128, 256, 512]
