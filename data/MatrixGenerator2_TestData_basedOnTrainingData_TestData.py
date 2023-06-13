@@ -92,18 +92,20 @@ def generate_signature_matrix_node(run, numOfRun):
 def main():
     import pickle
 
-    a_file = open("../../../../data/pklein/Datensatz2/training_data/raw_data/aux_df_test.pkl", "rb")
+    a_file = open("../../../../data/pklein/Datensatz2/training_data/raw_data/aux_df_train.pkl", "rb")
     y_labels = pickle.load(a_file)
     a_file.close()
     print("y_labels: ", y_labels['label'].values)
+    print("y_labels: ", y_labels)
 
-    y_labels = y_labels['label'].values
-    np.save(config.path + '/test_labels.npy', y_labels, )
-
+    #y_labels = y_labels['label'].values
+    #np.save(config.path + './../../../data/pklein/Datensatz2/training_data/training_data/labels_train_new.npy', y_labels, )
+    print(ssds)
     y_labels = np.load(config.path + '/test_labels.npy',allow_pickle=True)
     print("y_labels: ", y_labels)
+    print("all: ", len(y_labels))
     print("where no_failure: ", len(np.argwhere(y_labels != 'no_failure')))
-    print(sds)
+    #print(sds)
     # Import examples
     #y_labels = np.load("../../../../data/pklein/PredMSiamNN/data/training_data/valid_labels_new2.npy")  # labels of the training data
     #y_labels = np.load("../../../../data/pklein/Datensatz2/training_data/raw_data/x_train_val.npy")  # labels of the training data

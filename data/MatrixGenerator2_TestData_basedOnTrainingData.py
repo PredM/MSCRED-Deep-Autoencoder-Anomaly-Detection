@@ -97,6 +97,7 @@ def main():
     x_features = np.load("../../../../data/pklein/PredMSiamNN/data/training_data/train_features_new2.npy")  # data streams to train a machine learning model
     print("y_labels shape: ", y_labels.shape)
     print("x_features shape: ", x_features.shape)
+    print(sss)
     #TestRuns.shape[0]
     arr_index = np.where(y_labels != 'no_failure',1,0)
     arr_index2 = np.argwhere(y_labels != 'no_failure')

@@ -13,7 +13,7 @@ class Configuration:
         ###
         # General Configuration
         ###
-        self.curr_run_identifier = "Fin_DS_MANW_2022_Standard_" #Fin_Standard_wAdjMat_newAdj_2 #"Fin_Standard_wAdjMat_newAdj_2_wAdjMatwFM_"#"Fin_Standard_wAdjMat_newAdj_2_wAdjMatShuffled"
+        self.curr_run_identifier = "Fin_2022_2_MSCRED_AM_New_" #Fin_Standard_wAdjMat_newAdj_2 #"Fin_Standard_wAdjMat_newAdj_2_wAdjMatwFM_"#"Fin_Standard_wAdjMat_newAdj_2_wAdjMatShuffled"
         self.use_data_set_version = 2022_2
         self.train_model = True
         self.test_model = True
@@ -35,9 +35,9 @@ class Configuration:
         self.use_graph_conv = False
         self.normalize_residual_matrices = False     # Normalization of reconstruction error
 
-        self.use_loss_corr_rel_matrix = False   # MSCRED default: False, Reconstruction error loss is only based on correlations that are manually defined as relevant
+        self.use_loss_corr_rel_matrix = True   # MSCRED default: False, Reconstruction error loss is only based on correlations that are manually defined as relevant
         self.loss_use_batch_sim_siam = False    # MSCRED default: False,
-        self.use_corr_rel_matrix_for_input = False  # MSCRED default: False,  input contains only relevant correlations, others set to zero
+        self.use_corr_rel_matrix_for_input = True  # MSCRED default: False,  input contains only relevant correlations, others set to zero
         self.use_corr_rel_matrix_for_input_replace_by_epsilon = False  # MSCRED default: False,  meaningful correlation that would be zero, are now near zero
         self.use_corr_rel_matrix_on_masking_residual_matrices = False    # NOT USED; Masking out irrelevant correlations during the evaluation phase is already done with the activation of: use_loss_corr_rel_matrix
 
@@ -59,7 +59,7 @@ class Configuration:
         elif self.use_data_set_version == 2022_2:
             self.dim_of_dataset = 3
         #self.dim_of_dataset = 18  # 1: 8 2: 17 3:18
-        self.epochs = 100                           # used in eval: 100
+        self.epochs = 100000                           # used in eval: 100
         self.learning_rate = 0.001                  # used in eval: 0.001
         self.early_stopping_patience = 3            # used in eval: 3
         self.split_train_test_ratio = 0.1
@@ -157,7 +157,7 @@ class Configuration:
         # Data Set Configuration
         ###
         if self.use_data_set_version == 2022:
-            path = "../../../../data/pklein/MSCRED_Input_Data/"
+            path = "../../../../../data/pklein/MSCRED_Input_Data/"
         elif self.use_data_set_version == 2022_2:
             path = "../../../../data/pklein/MSCRED_Input_Data_2/"
         self.feature_names_path = path + "feature_names.npy"
@@ -218,7 +218,7 @@ class Configuration:
             self.test_labels_y_path = path + "test_labels.npy"
             self.train_faf_matrix_path = path + "sig_mat_train_failures4Test.npy"
             self.train_faf_labels_y_path = path + "sig_mat_train_failures4Test_labels.npy"
-            self.graph_adjacency_matrix_attributes_file = path + "adjmat_new.csv"  # "adjmat_new_shuffled.csv" #"adjacency_matrix_v3_fullGraph_sparse.CSV"
+            self.graph_adjacency_matrix_attributes_file = path + "a_pre_clean_.csv"  # "adjmat_new_shuffled.csv" #"adjacency_matrix_v3_fullGraph_sparse.CSV"
 
 
 
