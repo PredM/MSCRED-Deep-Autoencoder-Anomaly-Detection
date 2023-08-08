@@ -1,5 +1,7 @@
 # MSCRED Anomaly Detection
 The following section gives an overview of the packages, directories and included Python scripts in this repository. 
+The repo re-implemented [MSCRED Anomaly Detection](https://arxiv.org/abs/1811.08055) for research purposes and applied it to the data set of a [Fischertechnik
+Factory Model](https://www.wi2.uni-trier.de/shared/publications/2019_KleinBergmann_Predictive_Maintenance_data_generation_machine_learning.pdf). The repo is used to investigate the integration of expert knowledge into the model and to use the output for knowledge-based diagnosis / root-cause analysis.
 
 ## Code
 
@@ -25,6 +27,8 @@ The following section gives an overview of the packages, directories and include
     1. Transform them back in to the original sequence order by using: <i>data/GenerateNoFailureRuns.py </i>
     2. Generate the signature matrices by using: <i>data/MatrixGenerator2_TrainDataWOFailures.py </i>	
     3. Transform them into examples consisting of the step_size and gap_size by using: <i>data/Matrix_to_NN-Input_train_woFailure.py </i>
+### Used Data Set for Evaluation
+[Link](https://drive.google.com/file/d/18hSnNYVEIFJa2thCRQfzRFRLcnt3Qxez/view?usp=drive_link)
 
 ### Data Sets (with different Signature Matrix Configurations)
 From preprocessed time series data (4ms sampling rate, 250 entries per second), the following signature matrix data sets are generated:
@@ -37,5 +41,7 @@ From preprocessed time series data (4ms sampling rate, 250 entries per second), 
 
 The data can be found at the GPU server: <i>data/pklein/MSCRED_Input_Data/</i> 
 
-## Evaluation Results
-Results: https://seafile.rlp.net/f/ec678e4e9ee44883adb5/
+## Evaluation Results for Anomaly Detection
+Train and Eval Log:
+- [MSCRED](https://drive.google.com/file/d/1nyPK6VyBN0LcDWq7zdmPhDyHCk3ooai1/view?usp=drive_link)
+- [MSCRED + AM](https://drive.google.com/file/d/1CRxZIVQBZzjj8p7mQXnatX4dI7aZWGNY/view?usp=drive_link) (expert knowledge incorporated through masking correlations based on an adjacency matrix derived from a KG)
